@@ -40,6 +40,24 @@ Numbers over a threshold turn yellow, and red past a second threshold. The thres
 
 ## Install
 
+### Easiest: install right inside the Frame (recommended)
+
+No PC needed. In Konsole on the Frame (+ on the bar at the bottom → the list of programs → Konsole), type this command, press Enter, and pick **4** (frame-perf-overlay) from the menu.
+
+```sh
+curl -fsSL https://frame.sasaken1102s.net | sh
+```
+
+- Do this once first: Steam Settings → System → turn on "Enable Developer Mode" (while it's off, Konsole doesn't show up in the + list).
+- The other apps (frameeyeosc, frame-jp-keyboard, frame-mic-tuner) can be installed from the same menu.
+- To update, run the same command and pick the same number again. To uninstall, use `u` in the menu.
+- Step-by-step guide and video: https://frame.sasaken1102s.net
+- To install without any prompts: `curl -fsSL https://frame.sasaken1102s.net | sh -s -- install perf`
+
+What gets installed and the options are the same as in "Install from a PC" below (it runs `install.sh` for you).
+
+### Install from a PC
+
 Download `frame-perf-overlay-<version>.tar.gz` from the [releases page](https://github.com/sasaken1102r/frame-perf-overlay/releases) and copy it to the headset, for example from your PC:
 
 ```sh

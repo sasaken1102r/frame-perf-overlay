@@ -40,6 +40,24 @@ Half-Life: Alyx を遊びながらヘッドセットの中で撮った動画で�
 
 ## インストール
 
+### いちばんかんたん：Frame の中だけで入れる（おすすめ）
+
+PC は要りません。Frame の Konsole（画面下のバーの ＋ →「プログラムを起動」→ Konsole）で次のコマンドを入力して Enter を押し、メニューで **4**（frame-perf-overlay）を選びます。
+
+```sh
+curl -fsSL https://frame.sasaken1102s.net | sh
+```
+
+- 最初の 1 回だけ、Steam 設定 → システム →「開発者モードを有効化」をオンにしておきます（オフだと ＋ の一覧に Konsole が出ません）
+- ほかのアプリ（frameeyeosc・frame-jp-keyboard・frame-mic-tuner）も同じメニューから一緒に入れられます
+- 更新は、同じコマンドで同じ番号を選ぶだけ。アンインストールはメニューの `u` から
+- くわしい手順と動画：https://frame.sasaken1102s.net
+- 質問なしで入れるなら `curl -fsSL https://frame.sasaken1102s.net | sh -s -- install perf`
+
+入るもの・オプションは、下の「PC から入れる」と同じです（中で `install.sh` を実行しています）。
+
+### PC から入れる
+
 [リリースページ](https://github.com/sasaken1102r/frame-perf-overlay/releases)から `frame-perf-overlay-<バージョン>.tar.gz` をダウンロードして、ヘッドセットにコピーします。PC からなら例えば:
 
 ```sh
