@@ -442,6 +442,7 @@ void VrOverlay::pollEvents(VrEvents& result, bool includeSystem) {
     if (includeSystem) {
         while (vr::VRSystem()->PollNextEvent(&event, sizeof(event))) {
             if (event.eventType == vr::VREvent_Quit) result.quit = true;
+            if (event.eventType == vr::VREvent_SceneApplicationChanged) result.sceneAppChanged = true;
         }
         while (vr::VROverlay()->PollNextOverlayEvent(panelHandle_, &event, sizeof(event))) {
             if (event.eventType == vr::VREvent_ImageFailed) std::fprintf(stderr, "[VR] 画像の読み込みに失敗しました\n");
@@ -680,6 +681,30 @@ ControllerStatus VrOverlay::readControllers() {
     status.left = readControllerBattery(vr::TrackedControllerRole_LeftHand);
     status.right = readControllerBattery(vr::TrackedControllerRole_RightHand);
     return status;
+}
+
+bool VrOverlay::readSceneApp(SceneApp& app) const {
+    app = SceneApp();
+    if (!connected_ || vr::VRApplications() == nullptr) return false;
+    vr::IVRApplications* apps = vr::VRApplications();
+    app.pid = apps->GetCurrentSceneProcessId();
+    if (app.pid == 0) return true;
+    char key[vr::k_unMaxApplicationKeyLength] = {};
+    if (apps->GetApplicationKeyByProcessId(app.pid, key, sizeof(key)) == vr::VRApplicationError_None && key[0] != '\0') {
+        app.key = key;
+        char name[256] = {};
+        vr::EVRApplicationError error = vr::VRApplicationError_None;
+        apps->GetApplicationPropertyString(key, vr::VRApplicationProperty_Name_String, name, sizeof(name), &error);
+        if (error == vr::VRApplicationError_None) app.name = name;
+        return true;
+    }
+    // A scene process SteamVR has no app key for (e.g. a sideloaded app): name it by its process
+    const std::string comm = processName(app.pid);
+    if (!comm.empty() && comm != "?") {
+        app.key = "process." + comm;
+        app.name = comm;
+    }
+    return true;
 }
 
 void VrOverlay::dumpFrameTimings(double seconds, const volatile int& stop) {

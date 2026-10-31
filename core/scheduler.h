@@ -66,6 +66,12 @@ public:
     void setEnabledWidgets(const std::vector<WidgetType>& widgets);
 
     /**
+     * Same, with each instance's compact flag (enabledCompact(layout)): a compact General doesn't count for the
+     * sources only its full card shows (Uptime, SelfCost, SceneApp). The one-argument form treats every card as full.
+     */
+    void setEnabledWidgets(const std::vector<WidgetType>& widgets, const std::vector<bool>& compact);
+
+    /**
      * Sets the interval of the sources read every update (those with a kPerUpdateMs metric) to update_interval_ms.
      * The others keep their registry interval.
      * @param seconds the interval (update_interval_ms / 1000)
@@ -87,6 +93,13 @@ public:
      * @return when the next active source is due (monotonic seconds); +infinity if none is active
      */
     double nextDue(double now) const;
+
+    /**
+     * Makes the source due now, so the next runDue reads it, if it is wanted (a widget on the panel uses it and
+     * someone is looking). Does nothing otherwise: the read then happens when it becomes wanted, as usual.
+     * For events that say a value changed (the scene app).
+     */
+    void requestRead(SourceId source);
 
     /** @return the source's reference count (0 when nobody is looking) */
     uint32_t refCount(SourceId source) const;
@@ -122,6 +135,7 @@ private:
 
     std::array<SourceState, kSourceCount> sources_ {};
     std::vector<WidgetType> widgets_;
+    std::vector<bool> compact_;  ///< per widgets_ entry: the card is compact
     DemandInputs demand_;
     uint64_t recomputes_ = 0;
     double now_ = 0.0;  ///< last time passed to runDue (activation schedules the read for then)

@@ -3,12 +3,16 @@
 #pragma once
 
 #include "history.h"
+#include "layout.h"
 #include "metric_store.h"
+#include "process_scan.h"
 #include "scheduler.h"
 #include "sensors.h"
+#include "widgets.h"
 
 #include <vector>
 
+class HideRules;
 class VrOverlay;
 
 class SensorBridge {
@@ -29,11 +33,23 @@ public:
     /** @return every widget type, for --print (reads every system source) */
     static std::vector<frame_perf_overlay::WidgetType> allWidgets();
 
+    /** Takes the CPU / RAM items widgets' settings (rows, one row per name, Hide system) from the layout. */
+    void setProcessOptions(const frame_perf_overlay::Layout& layout);
+    /** The rules Hide system uses (nullptr = nothing is hidden). Not owned; must outlive the bridge. */
+    void setHideRules(HideRules* rules) { processes_.setHideRules(rules); }
+    /** @return the process lists of the last scan, for WidgetContext::processes */
+    const frame_perf_overlay::ProcessListsView& processLists() const { return processView_; }
 private:
+    /** The SceneApp source's reader (VREvent_SceneApplicationChanged makes it due: Scheduler::requestRead). */
+    void refreshSceneApp(double now);
     Sensors& sensors_;
     VrOverlay* vr_;
     frame_perf_overlay::MetricStore& store_;
+    ProcessScanner processes_;
+    ProcessListOptions processOptions_;
+    frame_perf_overlay::ProcessListsView processView_;
 
     void readFrameTiming(double now);
     void readControllers(double now);
+    void readProcesses(double now, bool resumed);
 };

@@ -1,6 +1,7 @@
 // /proc と /sys からの読み取り（読むだけ。書き込みは一切しない）。
 #pragma once
 
+#include "sensor_math.h"
 #include "wifi_link.h"
 
 #include <cstdint>
@@ -18,6 +19,15 @@ struct PowerChannel {
     std::string chip;    ///< hwmon の name（max34417_10 など）
     std::string label;   ///< power*_label（vph、apc0 など）
     double watts = kNoValue;
+    double volts = kNoValue;  ///< in*_input with the same label, mV → V (NaN if the chip has none)
+};
+
+/** One cpufreq policy (a cluster of cores sharing a clock). */
+struct ClusterClock {
+    std::string policy;          ///< "policy0", ...
+    double curMHz = kNoValue;
+    double maxMHz = kNoValue;    ///< scaling_max_freq: lower than the hardware max under a Playtime cap
+    double hwMaxMHz = kNoValue;  ///< cpuinfo_max_freq, the hardware max (read once)
 };
 
 /**
@@ -45,6 +55,7 @@ struct SensorSample {
     bool throttleGpu = false;
     // Steam Link の直通回線
     WifiInfo wifi;
+    WifiAdapters adapters;  ///< both interfaces (wifi is the combined link picked from these)
     // 電力（W）
     double powerMainW = kNoValue;      ///< 主電源レール（vph）
     double powerRailsW = kNoValue;     ///< vph 以外の全チャンネルの合計（vph から分かれたレールなので vph とは足さない）
@@ -61,6 +72,40 @@ struct SensorSample {
     double fanRpm = kNoValue;          ///< 回転数（fan1_input / 2）
     double memUsedGiB = kNoValue;
     double memTotalGiB = kNoValue;
+
+    // The full (non-compact) rows and the new widgets. Strings are empty and ints -1 when unknown.
+    std::vector<double> corePct;          ///< load per core, index = core number (NaN until the second read)
+    std::vector<ClusterClock> clusters;   ///< per cpufreq policy, ascending
+    double powerUnmeasuredW = kNoValue;   ///< vph − the measured rails (N/A if any rail failed to read)
+    double npuTempC = kNoValue;           ///< nsph* zones, max
+    double cameraTempC = kNoValue;        ///< camera* zones, max
+    double videoTempC = kNoValue;
+    double wifiTempC = kNoValue;          ///< vadc board spots
+    double flashTempC = kNoValue;
+    double nrfTempC = kNoValue;
+    double connectorTempC = kNoValue;
+    bool haveSource = false;              ///< the USB-C source power_supply (tcpm-source-psy-*)
+    double batteryAvgCurrentMa = kNoValue;  ///< current_avg, + = into the battery
+    double chargeNowMah = kNoValue;
+    double chargeFullMah = kNoValue;
+    double chargeDesignMah = kNoValue;
+    std::string batteryHealth;
+    long long batteryCycles = -1;
+    std::string chargerStatusDetailed;    ///< raw status_detailed text
+    int chargingEnable = -1;
+    int chargingPause = -1;
+    double setCurrentA = kNoValue;        ///< constant_charge_current
+    double setCurrentMaxA = kNoValue;     ///< constant_charge_current_max
+    bool sourceOnline = false;
+    std::string usbType;                  ///< raw usb_type ("[PD] C PD_PPS")
+    double sourceV = kNoValue;            ///< voltage_now of the USB-C source: the PD contract voltage
+    double sourceAMax = kNoValue;         ///< current_max: the PD contract current
+    double usbInV = kNoValue;             ///< vadc usb_sns (what arrives), only read while plugged in
+    double usbInA = kNoValue;             ///< vadc iin_fb, only read while plugged in
+    double uptimeS = kNoValue;            ///< /proc/uptime, includes suspend
+    double selfCpuPct = kNoValue;         ///< own CPU, % of one core, since the previous readSelfCost()
+    double selfRssMiB = kNoValue;
+    double selfPowerW = kNoValue;         ///< estimate: own share of busy CPU × CPU rails (apc0-2)
 };
 
 /**
@@ -85,30 +130,40 @@ public:
     // core/metric_registry.cpp): power and the wireless link every 2 s, the battery and the iio temperatures every
     // 5 s, the rest every update
 
-    /** /proc/stat → cpuUsagePct, cpuMaxCorePct (a delta: NaN on the first read after resetCpuBaseline()). */
+    /** /proc/stat → cpuUsagePct, cpuMaxCorePct, corePct (a delta: NaN on the first read after resetCpuBaseline()). */
     void readCpuUsage(SensorSample& sample);
     /** Forgets the /proc/stat baseline, so the next readCpuUsage() starts a fresh delta. */
     void resetCpuBaseline();
-    /** cpufreq → cpuFreqMHz (fastest cluster), cpuBigFreqMHz. */
+    /** cpufreq → cpuFreqMHz (fastest cluster), cpuBigFreqMHz, clusters. */
     void readCpuClocks(SensorSample& sample);
     /** devfreq → gpuFreqMHz, gpuMaxFreqMHz. */
     void readGpuClock(SensorSample& sample);
     /** /proc/meminfo → memUsedGiB, memTotalGiB. */
     void readMemory(SensorSample& sample);
-    /** thermal_zone → cpuTempC, gpuTempC, ddrTempC. */
+    /** thermal_zone → cpuTempC, gpuTempC, ddrTempC, npuTempC, cameraTempC, videoTempC. */
     void readThermal(SensorSample& sample);
-    /** iio vadc → displayTempC, exhaustTempC, heatsinkTempC. */
+    /** iio vadc → displayTempC, exhaustTempC, heatsinkTempC, the Wi-Fi / flash / nRF / connector spots. */
     void readIioTemps(SensorSample& sample);
     /** cooling_device → throttleCpu, throttleGpu. */
     void readThrottle(SensorSample& sample);
     /** hwmon fan1_input → fanRpm. */
     void readFan(SensorSample& sample);
-    /** max34417 → powerMainW, powerRailsW, powerChannels. */
+    /** max34417 → powerMainW, powerRailsW, powerUnmeasuredW, powerChannels (watts + volts). */
     void readPower(SensorSample& sample);
-    /** power_supply battery + charger → the battery fields. */
+    /** power_supply battery + charger + USB-C source, vadc USB input → the battery / charger / source fields. */
     void readBattery(SensorSample& sample);
+    /** /proc/uptime → uptimeS. */
+    void readUptime(SensorSample& sample);
     /**
-     * nl80211 + statistics → wifi (rates are a delta since the previous call).
+     * Own cost → selfCpuPct, selfRssMiB, selfPowerW. CPU and power are a delta since the previous call: NaN on the
+     * first call after resetSelfBaseline().
+     * @param now monotonic seconds
+     */
+    void readSelfCost(SensorSample& sample, double now);
+    /** Forgets the self-cost baseline. */
+    void resetSelfBaseline();
+    /**
+     * nl80211 + statistics → wifi, adapters (rates are a delta since the previous call).
      * @param now monotonic seconds
      */
     void readWifi(SensorSample& sample, double now);
@@ -149,9 +204,24 @@ private:
     std::vector<Source> gpuCooling_;                   ///< cooling_device（devfreq-*gpu）の cur_state
     WifiLink wifiLink_;
 
-    std::vector<uint64_t> prevBusy_;   ///< /proc/stat の前回値（[0] が全体、以降コアごと）
-    std::vector<uint64_t> prevTotal_;
-    std::vector<uint64_t> currentBusy_, currentTotal_;  ///< 次の読み取りにも領域を再利用する
+    sensor_math::CpuTicks prevTicks_;  ///< /proc/stat's last read, keyed by cpuN id (empty = no baseline)
+
+    // The full (non-compact) rows' files
+    std::vector<Source> powerVolts_;    ///< in*_input matching powers_[i] by label (fd -1 if none)
+    std::vector<Source> cpuMaxFreqs_;   ///< policy*/scaling_max_freq, same index as cpuFreqs_
+    std::vector<double> cpuHwMaxMHz_;   ///< policy*/cpuinfo_max_freq, read once at discover()
+    std::vector<Source> npuTemps_, cameraTemps_, videoTemps_;
+    Source wifiTemp_, flashTemp_, nrfTemp_, connectorTemp_;
+    Source batCurrentAvg_, batChargeNow_, batChargeFull_, batChargeDesign_, batHealth_, batCycles_;
+    Source chgStatusDetailed_, chgEnable_, chgPause_, chgCc_, chgCcMax_;
+    Source srcOnline_, srcUsbType_, srcVoltage_, srcCurrentMax_;
+    Source usbInV_, usbInA_;
+    Source uptime_, selfStatm_;
+    std::vector<size_t> cpuRailIdx_;    ///< indexes into powers_ of apc0-2 (the CPU rails), for the self-cost estimate
+    bool haveSelfPrev_ = false;
+    double prevSelfCpuSec_ = 0.0;
+    double prevSelfAt_ = 0.0;
+    uint64_t prevSysBusy_ = 0;
 
     /**
      * ファイルを読み取り専用で開いて Source を作る。

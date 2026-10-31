@@ -157,7 +157,7 @@ void testRoundTrip() {
     CHECK(p.layout.columns.size() == 1 && p.layout.columns[0].widgets.size() == 2);
     const WidgetInstance& items = p.layout.columns[0].widgets[1];
     CHECK(items.type == W::Battery && !items.compact);
-    CHECK(!p.layout.columns[0].widgets[0].compact);
+    CHECK(p.layout.columns[0].widgets[0].compact);  // a missing key: Frame compact, Battery / Temp full
 
     // Not a profile at all
     CHECK(!ProfileStore::fromJson("{ \"name\": \"x\" }", p, warnings, error));

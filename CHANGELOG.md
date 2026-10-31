@@ -1,5 +1,24 @@
 # 変更履歴
 
+## 未リリース
+
+### Readouts (finaea's PR)
+
+- The **Compact** switch is on every card that has more to show (all but GPU & RAM). Frame, CPU, Power, Network and General start compact, which is exactly their 0.4.0 card, so an updated panel keeps its shape (the default layout is unchanged). With Compact off:
+  - Frame: CPU and GPU frame-time graphs (the worst frame per read, average and worst in ms, the budget as a dotted line)
+  - CPU: a bar per core (an offline core doesn't shift the other bars), and each cluster's clock and current maximum ("capped from" while it's below the hardware maximum)
+  - Power: the vph voltage, every rail with W, V and its share of vph, and what no rail measures
+  - Battery: the V × A line, mAh (now / full / design), time to full / empty, health and cycles, the charger's mode, the set current, and with a cable in the USB type, USB-PD offer, what arrives and the sag
+  - Temp: DDR and every spot: battery, display, exhaust, heat sink, NPU, camera, video, and near the Wi-Fi chip, flash, nRF radio and 40-pin connector
+  - Network: both links in one card (the dongle, then Wi-Fi), each with its signal, rates, link rate, band, channel, width and IP address, or Not connected
+  - General: uptime, the app in front and this overlay's own cost (CPU, memory, ≈ W)
+  - Battery and Temp keep 0.4.0's meaning of `compact`. **Visible change:** a Battery or Temp that was not compact in 0.4.0 now shows these extra rows too (Temp 154 → 198 px, Battery 142 → 222–322 px, depending on which rows show); compact ones and the default layout are unchanged
+- New widgets **CPU items** and **RAM items**: the busiest processes by CPU (% of one core) and by memory, every 2 seconds, with the number of rows (1-50), One row per name, and Hide system. A process shows by its comm name, or by its program's file name when the comm is a cut-off start of it ("at-spi-bus-launcher") or the other way round ("vrlink"). Hide system's list is `hide_rules.json` next to the settings file (written once with a built-in list, re-read when edited; built-in rules added in a later version are appended at start, and a file that doesn't load shows a line on the card while the last good rules stay in use)
+- New readings are read only while a widget that shows them is on the panel and someone is looking, like the rest: processes every 2 s, uptime every 1 s, this overlay's own cost every 2 s, the app in front every 5 s and at once when SteamVR changes app. The last three are read only while General has Compact off. After the panel shows again, the process lists and the HUD cost read again 0.25 s later
+- The layout file takes `"compact"` on the new types (`false` is written only when off; a missing key keeps the 0.4.0 card), and `"max_items"`, `"sum_same_name"` and `"hide_system"` on the process lists
+- New UI strings are in English in both languages for now (TODO(ja))
+- Tests: the new readers (fake `/sys` and `/proc`), the cards with Compact off, the process lists and hide rules, and that 0.4.0 layouts keep their size
+
 ## 0.4.0 — 2026-10-24
 
 ### ウィジェットの並べ替え・レイアウトの編集・プロファイル（finaea さんの PR #4）

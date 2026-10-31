@@ -67,6 +67,41 @@ struct WidgetText {
     const char* left;
     const char* right;
     const char* time;
+    // The full (non-compact) rows and the process lists
+    const char* cpuItems;   ///< title of widget 7
+    const char* ramItems;   ///< title of widget 8
+    const char* msMaxSep;   ///< Frame times: between the average and the worst ("ms · max")
+    const char* capped;     ///< CPU cluster under a Playtime cap, followed by the hardware max GHz
+    const char* unmeasured; ///< Power: vph minus the measured rails
+    const char* charge;     ///< Battery rows
+    const char* design;     ///< after the charge: "(design N)"
+    const char* toFull;
+    const char* toEmpty;
+    const char* health;
+    const char* cycles;
+    const char* charger;
+    const char* setCurrent;
+    const char* usb;
+    const char* unplugged;
+    const char* pdOffered;
+    const char* arriving;
+    const char* sag;
+    const char* sagHigh;    ///< after the sag volts when it's 10% or more of the offered volts
+    const char* tNpu;       ///< Temp spots
+    const char* tCamera;
+    const char* tVideo;
+    const char* tWifi;
+    const char* tFlash;
+    const char* tNrf;
+    const char* tConnector;
+    const char* pctOfCore;  ///< CPU items' column heading
+    const char* rss;        ///< RAM items' column heading
+    const char* ip;         ///< Network, followed by the address
+    const char* uptime;     ///< General rows
+    const char* app;
+    const char* noApp;      ///< no scene app (SteamVR Home)
+    const char* hudCost;
+    const char* hideRulesError;  ///< CPU / RAM items with Hide system: hide_rules.json didn't load
 };
 
 /**

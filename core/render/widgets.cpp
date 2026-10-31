@@ -29,12 +29,31 @@ constexpr double kLineH = 22;                 // text rows (temps, general)
 // Heights (card)
 constexpr int kGraphCardH = 102;  // the fixed panel's row: 92 + 6 above + 4 below
 constexpr int kBatteryCompactH = static_cast<int>(kTop) + 82;  // % + the W line
-constexpr int kBatteryFullH = static_cast<int>(kTop + 106 + kRowH) + 10;
-constexpr int kTempSpots = 4;
-constexpr int kTempFullH = kGraphCardH + (kTempSpots + 2) / 3 * static_cast<int>(kLineH) + 8;
 constexpr int kCpuH = static_cast<int>(kTop) + 58;
 constexpr int kNetworkShortH = 64;   // no link: the state line only
 constexpr int kNetworkFullH = static_cast<int>(kTop) + 82;
+
+// The extra rows each card shows with Compact off, below its usual ones (Compact on = the card as before them)
+// Frame: a label line, then the CPU and GPU frame-time graphs side by side
+constexpr double kFrameTimesGap = 12;                                // between the two graphs
+constexpr double kFrameTimesW = (kInR - kInX - kFrameTimesGap) / 2;  // 236
+constexpr double kFrameTimesLabelY = kGraphCardH + 14;               // label baseline
+constexpr double kFrameTimesBedY = kGraphCardH + 22;
+constexpr double kFrameTimesH = 60;
+constexpr int kFrameFullH = static_cast<int>(kFrameTimesBedY + kFrameTimesH) + 10;  // 194
+// CPU: one bar per core under the usage line, then the clusters two per row
+constexpr double kCoreBarTop = 58;   // from the card top
+constexpr double kCoreBarH = 56;
+constexpr double kClusterTop = kCoreBarTop + kCoreBarH + 38;  // first cluster row's baseline
+constexpr int kCpuFullMinH = static_cast<int>(kCoreBarTop + kCoreBarH) + 30;  // bars and their labels
+// Power: vph, its rails and what they don't cover, one row each, under a W / V header
+constexpr int kPowerTreeRows = 13;
+constexpr int kPowerFullH = kGraphCardH + static_cast<int>(kRowH) * (kPowerTreeRows + 1) + 10;
+// Temp: every other spot, three per row
+constexpr int kTempSpots = 11;
+constexpr int kTempFullH = kGraphCardH + (kTempSpots + 2) / 3 * static_cast<int>(kLineH) + 8;
+// Process lists: a heading, then one row per process
+constexpr double kListTop = 26;
 
 /** Value state. */
 enum class Level { Normal, Warn, Crit };
@@ -78,6 +97,18 @@ RateText formatRate(double mbps) {
     const long kbps = std::lround(std::max(0.0, mbps) * 1000.0 + 1e-6);  // + 1e-6: 0.9995 is stored as 0.99949999…
     if (kbps < 1000) return {std::to_string(kbps), " kbps"};  // 0.024 Mbps reads "24 kbps", not "0.0"
     return {num(mbps, mbps >= 100 ? 0 : 1), " Mbps"};
+}
+
+std::string ellipsize(const Pen& pen, const std::string& s, double size, double maxWidth, bool bold) {
+    if (pen.measure(s, size, bold) <= maxWidth) return s;
+    std::string cut = s;
+    while (!cut.empty()) {
+        // One whole UTF-8 character per step: its continuation bytes (10xxxxxx), then its lead (or ASCII) byte
+        while (!cut.empty() && (static_cast<unsigned char>(cut.back()) & 0xC0) == 0x80) cut.pop_back();
+        if (!cut.empty()) cut.pop_back();
+        if (pen.measure(cut + "..", size, bold) <= maxWidth) return cut + "..";
+    }
+    return "..";
 }
 
 namespace {
@@ -127,6 +158,11 @@ Reason reasonOf(const WidgetContext& ctx, uint16_t id) {
 
 const WidgetText& texts(const WidgetContext& ctx) {
     return widgetText(ctx.language);
+}
+
+/** Whether the instance draws its extra rows: Compact off. */
+bool moreRows(const WidgetInstance& w) {
+    return hasCompactView(w.type) && !w.compact;
 }
 
 /** "N/A: <reason>" */
@@ -345,6 +381,39 @@ std::string clockText(const std::string& stamp, int format) {
     return date + "  " + stamp.substr(11, 5);
 }
 
+/** "≈" drawn as two tildes (not every system font has U+2248). @return width */
+double drawApprox(const Pen& pen, double x, double baseline, double size, Color c) {
+    const double w = size * 0.55;
+    const double amp = size * 0.07;
+    cairo_save(pen.cr);
+    pen.color(c);
+    cairo_set_line_width(pen.cr, std::max(1.2, size * 0.08));
+    cairo_set_line_cap(pen.cr, CAIRO_LINE_CAP_ROUND);
+    for (const double dy : {size * 0.40, size * 0.22}) {
+        const double y = baseline - dy;
+        cairo_move_to(pen.cr, x + 1, y + amp);
+        cairo_curve_to(pen.cr, x + w * 0.35, y - 2 * amp, x + w * 0.65, y + 2 * amp, x + w - 1, y - amp);
+        cairo_stroke(pen.cr);
+    }
+    cairo_restore(pen.cr);
+    return w + 2;
+}
+
+/** "1h 05m", "2d 3h", "4m 07s" */
+std::string durationText(double seconds) {
+    if (std::isnan(seconds) || seconds < 0) return "--";
+    const long s = static_cast<long>(seconds);
+    char buffer[32];
+    if (s >= 86400) {
+        std::snprintf(buffer, sizeof(buffer), "%ldd %ldh", s / 86400, (s % 86400) / 3600);
+    } else if (s >= 3600) {
+        std::snprintf(buffer, sizeof(buffer), "%ldh %02ldm", s / 3600, (s % 3600) / 60);
+    } else {
+        std::snprintf(buffer, sizeof(buffer), "%ldm %02lds", s / 60, s % 60);
+    }
+    return buffer;
+}
+
 /** "V × A = W" with N/A parts as "--" */
 std::string vawText(double v, double a, double w) {
     return num(v, 2) + " V × " + num(a, 2) + " A = " + num(w, 1) + " W";
@@ -362,6 +431,21 @@ void staticGraphBed(const Pen& pen, double x, double y) {
     cairo_fill(pen.cr);
 }
 
+/** Frame's extra graphs (Compact off), CPU (k = 0) on the left, GPU (1) on the right. */
+GraphArea frameTimesArea(double x, double y, int k, double maxV, const WidgetContext& ctx) {
+    return GraphArea {x + kInX + k * (kFrameTimesW + kFrameTimesGap), y + kFrameTimesBedY, kFrameTimesW, kFrameTimesH,
+                      0.0, maxV, ctx.now, static_cast<double>(std::max(1, ctx.graphSeconds))};
+}
+
+void staticFrameTimesBeds(const Pen& pen, double x, double y) {
+    pen.color(kBg);
+    for (int k = 0; k < 2; ++k) {
+        pen.roundedRect(x + kInX + k * (kFrameTimesW + kFrameTimesGap), y + kFrameTimesBedY, kFrameTimesW,
+                        kFrameTimesH, 6);
+        cairo_fill(pen.cr);
+    }
+}
+
 void staticTitle(const Pen& pen, double x, double y, const std::string& title) {
     pen.text(x + kInX, y + kTop + 17, title, 16, kTextMuted);
 }
@@ -374,6 +458,8 @@ const char* titleOf(const WidgetInstance& w, const WidgetText& t) {
         case WidgetType::Power: return t.power;
         case WidgetType::Battery: return t.battery;
         case WidgetType::Temp: return t.temp;
+        case WidgetType::CpuItems: return t.cpuItems;
+        case WidgetType::RamItems: return t.ramItems;
         case WidgetType::Network: return t.network;
         case WidgetType::General: return t.general;
         case WidgetType::None: break;
@@ -388,7 +474,8 @@ bool hasGraph(WidgetType type) {
 
 // ---- Widgets ----
 
-void drawFrame(const Pen& pen, double x, double y, const WidgetContext& ctx, const WidgetHistory& h) {
+void drawFrame(const Pen& pen, double x, double y, const WidgetInstance& w, const WidgetContext& ctx,
+               const WidgetHistory& h) {
     const Thresholds& th = ctx.thresholds;
     const WidgetText& t = texts(ctx);
     const double cx = x + kInX;
@@ -436,9 +523,95 @@ void drawFrame(const Pen& pen, double x, double y, const WidgetContext& ctx, con
         drawBadge(pen, area.x + area.w - 4, area.y + 4, throttleBadgeText(t, scaleHz, static_cast<int>(throttled)),
                   kWarn);
     }
+    if (!moreRows(w)) return;
+
+    // CPU and GPU frame times, the worst frame per read, on one scale so the two compare. Dotted line: the budget
+    const double budget = std::isnan(targetMs) ? 1000.0 / scaleHz : targetMs;
+    const double dataMax = std::fmax(h.c.maxValue(), h.d.maxValue());
+    const double msMax = std::ceil(std::fmax(budget * 1.5, std::isnan(dataMax) ? 0.0 : dataMax * 1.15) / 5.0) * 5.0;
+    const struct {
+        const char* name;
+        uint16_t avgId, maxId;
+        const History* history;
+        Color color;
+    } kTimes[] = {{"CPU ", kFrameCpuMs, kFrameCpuMaxMs, &h.c, kAccent}, {"GPU ", kFrameGpuMs, kFrameGpuMaxMs, &h.d, kGpu}};
+    for (int k = 0; k < 2; ++k) {
+        const GraphArea times = frameTimesArea(x, y, k, msMax, ctx);
+        const double avg = f(ctx, kTimes[k].avgId);
+        const double worst = f(ctx, kTimes[k].maxId);
+        double lx = times.x + 2;
+        const double ly = y + kFrameTimesLabelY;
+        lx += pen.text(lx, ly, kTimes[k].name, 14, kTextMuted);
+        lx += pen.text(lx, ly, num(avg, 1), 14, colorOf(msLevel(avg)), true);
+        lx += pen.text(lx, ly, t.msMaxSep, 13, kTextMuted);
+        pen.text(lx, ly, num(worst, 1), 14, colorOf(msLevel(worst)), true);
+        drawGraphLabel(pen, times, num(msMax, 0) + " ms");
+        drawGuide(pen, times, targetMs, kTextMuted);
+        drawSeries(pen, times, *kTimes[k].history, kTimes[k].color);
+    }
 }
 
-void drawCpu(const Pen& pen, double x, double y, const WidgetContext& ctx) {
+/** @return whether cluster k has a clock (a cluster this SoC doesn't have is N/A SensorMissing) */
+bool hasCluster(const WidgetContext& ctx, uint16_t k) {
+    return ok(ctx, kCpuCluster0Mhz + k) || reasonOf(ctx, kCpuCluster0Mhz + k) != Reason::SensorMissing;
+}
+
+/** CPU's height with Compact off: the core bars, then one row per two clusters that exist. */
+int cpuFullHeight(const WidgetContext* ctx) {
+    int clusters = 3;  // no values yet: the Frame's 3 clusters (2 rows)
+    if (ctx != nullptr) {
+        clusters = 0;
+        for (uint16_t k = 0; k < kCpuClusterSlots; ++k) {
+            if (hasCluster(*ctx, k)) clusters = k + 1;
+        }
+    }
+    if (clusters == 0) return kCpuFullMinH;
+    return static_cast<int>(kClusterTop + (clusters - 1) / 2 * kLineH) + 14;
+}
+
+/** CPU's extra rows: one bar per core, then each cluster's current / max clock ("capped" under a Playtime cap). */
+void drawCpuCores(const Pen& pen, double x, double y, const WidgetContext& ctx) {
+    const Thresholds& th = ctx.thresholds;
+    const WidgetText& t = texts(ctx);
+    const double cx = x + kInX;
+    const double barTop = y + kCoreBarTop;
+    const double gap = 10;
+    const double barW = (kInR - kInX - gap * (kCpuCoreSlots - 1)) / kCpuCoreSlots;
+    for (uint16_t c = 0; c < kCpuCoreSlots; ++c) {
+        const uint16_t id = kCpuCore0Pct + c;
+        if (!ok(ctx, id) && reasonOf(ctx, id) == Reason::SensorMissing) continue;  // past the last core
+        const double bx = cx + c * (barW + gap);
+        pen.color(kBg);
+        pen.roundedRect(bx, barTop, barW, kCoreBarH, 4);
+        cairo_fill(pen.cr);
+        const double pct = f(ctx, id);
+        if (!std::isnan(pct)) {
+            const double fill = std::clamp(pct, 0.0, 100.0) / 100.0 * kCoreBarH;
+            pen.color(colorOf(levelOf(pct, th.cpuWarnPct, th.cpuCritPct), kAccent));
+            pen.roundedRect(bx, barTop + kCoreBarH - fill, barW, fill, std::min(4.0, fill / 2));
+            cairo_fill(pen.cr);
+        }
+        textCentered(pen, bx + barW / 2, barTop + kCoreBarH + 16, num(pct, 0), 13, kTextMuted, false);
+    }
+    const double half = (kInR - kInX) / 2;
+    for (uint16_t k = 0; k < kCpuClusterSlots; ++k) {
+        if (!hasCluster(ctx, k)) continue;
+        const double rx = cx + (k % 2) * half;
+        const double ry = y + kClusterTop + (k / 2) * kLineH;
+        const double cur = f(ctx, kCpuCluster0Mhz + k);
+        const double max = f(ctx, kCpuCluster0MaxMhz + k);
+        const double hwMax = f(ctx, kCpuCluster0HwMaxMhz + k);
+        double lx = rx + pen.text(rx, ry, "C" + std::to_string(k) + " ", 14, kTextMuted);
+        lx += pen.text(lx, ry, num(cur / 1000.0, 2), 15, kText, true);
+        lx += pen.text(lx, ry, "/" + num(max / 1000.0, 2) + "GHz", 14, kTextMuted);
+        if (!std::isnan(max) && !std::isnan(hwMax) && max < hwMax - 1.0) {
+            pen.text(lx + 6, ry, std::string(t.capped) + num(hwMax / 1000.0, 2), 12, kWarn, true);
+        }
+    }
+}
+
+void drawCpu(const Pen& pen, double x, double y, const WidgetInstance& w, const WidgetContext& ctx) {
+    if (moreRows(w)) drawCpuCores(pen, x, y, ctx);
     const Thresholds& th = ctx.thresholds;
     const WidgetText& t = texts(ctx);
     const double top = y + kTop;
@@ -487,7 +660,64 @@ void drawGpuRam(const Pen& pen, double x, double y, const WidgetContext& ctx, co
     drawSeries(pen, area, h.a, kGpu);
 }
 
-void drawPower(const Pen& pen, double x, double y, const WidgetContext& ctx, const WidgetHistory& h) {
+struct Rail {
+    const char* group;  ///< label prefix (nullptr = indented sub-rail)
+    const char* name;
+    uint16_t id;        ///< watts id (volts at + kPowerRailVoltsOffset); 0 = the CPU sum row
+};
+
+/** Power's extra rows: vph, the rails under it with W + V and a share-of-vph bar, and what they don't cover. */
+void drawPowerTree(const Pen& pen, double x, double y, const WidgetContext& ctx) {
+    const WidgetText& t = texts(ctx);
+    static const Rail kRails[] = {
+        {"CPU", "apc0-2", 0},           {nullptr, "apc0", kPowerApc0W}, {nullptr, "apc1", kPowerApc1W},
+        {nullptr, "apc2", kPowerApc2W}, {"GPU", "gfx", kPowerGfxW},     {"NPU", "nsp1", kPowerNsp1W},
+        {"NPU", "nsp2", kPowerNsp2W},   {"", "s1c", kPowerS1cW},        {"", "s3c", kPowerS3cW},
+        {"", "s6c", kPowerS6cW},        {"", "bob", kPowerBobW},
+    };
+    const double cx = x + kInX;
+    const double vph = f(ctx, kPowerVphW);
+    const double barX = x + 200;
+    const double barW = 120;
+    const double wRight = x + 400;
+    const double vRight = x + kInR;
+    double ry = y + kTop + 100;
+    pen.text(wRight, ry + 2, "W", 12, kTextMuted, false, true);
+    pen.text(vRight, ry + 2, "V", 12, kTextMuted, false, true);
+    const auto row = [&](const std::string& label, bool indent, double watts, const std::string& volts, Color c) {
+        ry += kRowH;
+        pen.text(cx + (indent ? 22 : 8), ry, label, 14, indent ? kTextMuted : kText);
+        if (!std::isnan(watts) && !std::isnan(vph) && vph > 0) {
+            pen.color(kAccent, kAccentTintAlpha * 1.5);
+            pen.roundedRect(barX, ry - 10, std::clamp(watts / vph, 0.0, 1.0) * barW, 8, 3);
+            cairo_fill(pen.cr);
+        }
+        pen.text(wRight, ry, num(watts, 2), 14, c, false, true);
+        pen.text(vRight, ry, volts, 14, kTextMuted, false, true);
+    };
+    row("vph", false, vph, num(f(ctx, kPowerVphV), 2), kText);
+    for (const Rail& r : kRails) {
+        if (r.id == 0) {
+            const double sum = f(ctx, kPowerApc0W) + f(ctx, kPowerApc1W) + f(ctx, kPowerApc2W);  // NaN if any is N/A
+            row(std::string(r.group) + " " + r.name, false, sum, "", kText);
+            continue;
+        }
+        const uint16_t vid = static_cast<uint16_t>(r.id + kPowerRailVoltsOffset);
+        // gfx's voltage sense reads 2-7 mV at ~0.4 W: not a real reading, so "—" rather than a number
+        std::string volts = num(f(ctx, vid), 2);
+        if (!ok(ctx, vid) && reasonOf(ctx, vid) == Reason::InvalidReading) volts = "—";
+        const std::string label = r.group == nullptr ? r.name
+                                  : (r.group[0] != '\0' ? std::string(r.group) + " " + r.name : std::string(r.name));
+        row(label, r.group == nullptr, f(ctx, r.id), volts, kText);
+    }
+    // vph − rails is unclamped data (the chips sample at slightly different times): never show a negative
+    const double unmeasured = f(ctx, kPowerUnmeasuredW);
+    row(t.unmeasured, false, std::isnan(unmeasured) ? unmeasured : std::max(0.0, unmeasured), "", kTextMuted);
+}
+
+void drawPower(const Pen& pen, double x, double y, const WidgetInstance& w, const WidgetContext& ctx,
+               const WidgetHistory& h) {
+    if (moreRows(w)) drawPowerTree(pen, x, y, ctx);
     const Thresholds& th = ctx.thresholds;
     const WidgetText& t = texts(ctx);
     const double cx = x + kInX;
@@ -523,6 +753,29 @@ std::string statusText(const WidgetContext& ctx) {
     return "";
 }
 
+/** Which of Battery's optional rows show (the height follows them). */
+struct BatteryRows {
+    bool plugged = false;
+    bool toFull = false;
+    bool toEmpty = false;
+    bool setCurrent = false;
+    bool pdOffered = false;
+    bool sag = false;
+
+    int count() const { return 4 + toFull + toEmpty + setCurrent + (plugged ? 2 : 1) + pdOffered + sag; }
+};
+
+BatteryRows batteryRows(const WidgetContext& ctx) {
+    BatteryRows rows;
+    rows.plugged = i(ctx, kBatteryPlugged) != 0;
+    rows.toFull = ok(ctx, kBatteryTimeToFullS);
+    rows.toEmpty = ok(ctx, kBatteryTimeToEmptyS);
+    rows.setCurrent = ok(ctx, kBatterySetCurrentA);
+    rows.pdOffered = rows.plugged && ok(ctx, kBatteryPdOfferedV);
+    rows.sag = rows.plugged && ok(ctx, kBatterySagV);
+    return rows;
+}
+
 void drawBattery(const Pen& pen, double x, double y, const WidgetInstance& w, const WidgetContext& ctx) {
     const Thresholds& th = ctx.thresholds;
     const WidgetText& t = texts(ctx);
@@ -551,9 +804,46 @@ void drawBattery(const Pen& pen, double x, double y, const WidgetInstance& w, co
     pen.text(cx + 14, top + 72, std::isnan(watts) ? "--" : num(std::fabs(watts), 2) + " W " + flow, 15, kText);
     if (w.compact) return;  // % and the W into / from the battery
     pen.text(cx + 14, top + 88, t.batteryNote, 13, kTextMuted);
-    labelValue(pen, cx + 8, right, top + 106 + kRowH, !std::isnan(watts) && watts < 0 ? t.flowOut : t.flowIn,
-               vawText(f(ctx, kBatteryVoltageV), std::fabs(f(ctx, kBatteryCurrentMa)) / 1000.0, std::fabs(watts)),
-               kText, 14);
+    const std::string flowLabel = !std::isnan(watts) && watts < 0 ? t.flowOut : t.flowIn;
+    const std::string flowValue =
+        vawText(f(ctx, kBatteryVoltageV), std::fabs(f(ctx, kBatteryCurrentMa)) / 1000.0, std::fabs(watts));
+    // Capacity, the flow, time left, health, the charger and the USB-C source
+    const BatteryRows rows = batteryRows(ctx);
+    double ry = top + 106;
+    const auto row = [&](const std::string& label, const std::string& v, Color c = kText) {
+        ry += kRowH;
+        labelValue(pen, cx + 8, right, ry, label, v, c, 14);
+    };
+    row(t.charge, num(f(ctx, kBatteryChargeNowMah), 0) + " / " + num(f(ctx, kBatteryChargeFullMah), 0) + " mAh (" +
+                      t.design + " " + num(f(ctx, kBatteryChargeDesignMah), 0) + ")");
+    row(flowLabel, flowValue);
+    // Time rows only while they mean something (charging / discharging)
+    if (rows.toFull) row(t.toFull, durationText(static_cast<double>(i(ctx, kBatteryTimeToFullS))));
+    if (rows.toEmpty) row(t.toEmpty, durationText(static_cast<double>(i(ctx, kBatteryTimeToEmptyS))));
+    const std::string health = text(ctx, kBatteryHealth);
+    row(t.health, (health.empty() ? "--" : health) + " · " + t.cycles + " " +
+                      (ok(ctx, kBatteryCycles) ? std::to_string(i(ctx, kBatteryCycles)) : std::string("--")));
+    const std::string mode = text(ctx, kBatteryChargerMode);
+    row(t.charger, mode.empty() ? "--" : mode);
+    if (rows.setCurrent) {
+        row(t.setCurrent, num(f(ctx, kBatterySetCurrentA), 2) + " A (max " + num(f(ctx, kBatterySetCurrentMaxA), 2) +
+                              " A)");
+    }
+    if (!rows.plugged) {
+        row(t.usb, t.unplugged, kTextMuted);
+        return;
+    }
+    const std::string usb = text(ctx, kBatteryUsbType);
+    row(t.usb, usb.empty() ? "--" : usb);
+    const double offeredV = f(ctx, kBatteryPdOfferedV);
+    if (rows.pdOffered) row(t.pdOffered, vawText(offeredV, f(ctx, kBatteryPdOfferedA), f(ctx, kBatteryPdOfferedW)));
+    row(t.arriving, vawText(f(ctx, kBatteryInputV), f(ctx, kBatteryInputA), f(ctx, kBatteryInputW)));
+    if (rows.sag) {
+        // Sag at or above 10% of the offered voltage is worth a look (cable, plug, charger)
+        const double sag = f(ctx, kBatterySagV);
+        const bool high = !std::isnan(offeredV) && offeredV > 0 && sag >= 0.10 * offeredV;
+        row(t.sag, num(sag, 2) + " V" + (high ? t.sagHigh : ""), high ? kWarn : kText);
+    }
 }
 
 void drawTemp(const Pen& pen, double x, double y, const WidgetInstance& w, const WidgetContext& ctx,
@@ -596,10 +886,13 @@ void drawTemp(const Pen& pen, double x, double y, const WidgetInstance& w, const
         uint16_t id;
     } kSpots[kTempSpots] = {
         {t.tBattery, kTempBatteryC}, {t.tDisplay, kTempDisplayC}, {t.tExhaust, kTempExhaustC},
-        {t.tHeatsink, kTempHeatsinkC},
+        {t.tHeatsink, kTempHeatsinkC}, {t.tNpu, kTempNpuC},     {t.tCamera, kTempCameraC},
+        {t.tVideo, kTempVideoC},     {t.tWifi, kTempWifiC},       {t.tFlash, kTempFlashC},
+        {t.tNrf, kTempNrfC},         {t.tConnector, kTempConnectorC},
     };
     const double colW = (kInR - kInX) / 3;
-    for (int k = 0; k < (w.compact ? 0 : kTempSpots); ++k) {
+    const int spots = w.compact ? 0 : kTempSpots;
+    for (int k = 0; k < spots; ++k) {
         const double sx = cx + (k % 3) * colW;
         const double sy = top + 114 + (k / 3) * kLineH;
         const double v = f(ctx, kSpots[k].id);
@@ -614,16 +907,98 @@ void drawTemp(const Pen& pen, double x, double y, const WidgetInstance& w, const
     }
 }
 
+const char* bandText(int64_t band) {
+    switch (static_cast<WifiBand>(band)) {
+        case WifiBand::Ghz2_4: return "2.4 GHz";
+        case WifiBand::Ghz5: return "5 GHz";
+        case WifiBand::Ghz6: return "6 GHz";
+        case WifiBand::Ghz60: return "60 GHz";
+        case WifiBand::Unknown: break;
+    }
+    return "";
+}
+
 bool networkExpanded(const WidgetContext& ctx) {
     return i(ctx, kNetInterfaceUp) != 0 && i(ctx, kNetConnected) != 0;
 }
 
-void drawNetwork(const Pen& pen, double x, double y, const WidgetContext& ctx) {
+// Compact off: both links, one block each (the dongle, then home Wi-Fi), from the per-adapter metrics
+constexpr double kLinkBlockTop = 24;     // first block's top, under the title row
+constexpr double kLinkBlockShortH = 50;  // label row + the state line
+constexpr double kLinkBlockFullH = 92;   // label row, rates, radio, IP
+
+/** @return whether the adapter block at base has a peer (its block then shows rates, radio and IP) */
+bool linkConnected(const WidgetContext& ctx, uint16_t base) {
+    return ok(ctx, base + kNetAdapterPresent) && i(ctx, base + kNetAdapterPresent) != 0 &&
+           i(ctx, base + kNetAdapterConnected) != 0;
+}
+
+/** Network's height with Compact off: the title row, then each link's block. No values yet: both full. */
+int networkFullHeight(const WidgetContext* ctx) {
+    double h = kTop + kLinkBlockTop;
+    for (const uint16_t base : {kNetDongleBase, kNetHomeBase}) {
+        h += ctx == nullptr || linkConnected(*ctx, base) ? kLinkBlockFullH : kLinkBlockShortH;
+    }
+    return static_cast<int>(h) + 6;
+}
+
+/** One link's block: label + interface, signal; then ↓/↑, link rate · band · ch · width, IP. @return its height */
+double drawLinkBlock(const Pen& pen, double x, double top, const char* label, uint16_t base, const WidgetContext& ctx) {
+    const Thresholds& th = ctx.thresholds;
+    const WidgetText& t = texts(ctx);
+    const double cx = x + kInX + 8;
+    const double right = x + kInR;
+    double lx = cx + pen.text(cx, top + 20, label, 15, kText, true);
+    const std::string ifname = text(ctx, base + kNetAdapterIfName);
+    if (!ifname.empty()) pen.text(lx + 8, top + 20, ifname, 13, kTextMuted);
+    const uint16_t present = base + kNetAdapterPresent;
+    if (!ok(ctx, present) || !linkConnected(ctx, base)) {
+        // Not read (yet) or the read failed: the reason; there but without a peer, or not there: "Not connected"
+        drawWifiIcon(pen, right - 26, top + 21, 0, kTextMuted, true);
+        pen.text(cx, top + 42, ok(ctx, present) ? std::string(t.notConnected) : naText(ctx, present), 15, kTextMuted);
+        return kLinkBlockShortH;
+    }
+    const double dbm = f(ctx, base + kNetAdapterSignalDbm);
+    const Level signalLevel = levelOf(dbm, th.wifiWarnDbm, th.wifiCritDbm, true);
+    std::string signal = std::isnan(dbm) ? "--" : num(std::fabs(dbm), 0);
+    if (!std::isnan(dbm) && dbm < 0) signal = "−" + signal;
+    const double sw = pen.text(right, top + 20, signal + " dBm", 13, colorOf(signalLevel, kTextMuted), false, true);
+    drawWifiIcon(pen, right - sw - 32, top + 21, wifiBars(dbm, th), colorOf(signalLevel), false);
+    const RateText down = formatRate(f(ctx, base + kNetAdapterRxMbps));
+    const RateText upRate = formatRate(f(ctx, base + kNetAdapterTxMbps));
+    const double ry = top + 42;
+    lx = cx;
+    lx += drawArrow(pen, lx, ry, false, kTextMuted);
+    lx += pen.text(lx, ry, down.value, 17, kText, true);
+    lx += pen.text(lx, ry, down.unit, 14, kTextMuted);
+    lx += 8;
+    lx += drawArrow(pen, lx, ry, true, kTextMuted);
+    lx += pen.text(lx, ry, upRate.value, 15, kText);
+    pen.text(lx, ry, upRate.unit, 14, kTextMuted);
+    std::string radio = std::string(t.link) + num(f(ctx, base + kNetAdapterTxLinkMbps), 0) + "/" +
+                        num(f(ctx, base + kNetAdapterRxLinkMbps), 0) + " Mbps";
+    const std::string band = bandText(i(ctx, base + kNetAdapterBand));
+    if (!band.empty()) radio += "  ·  " + band;
+    if (ok(ctx, base + kNetAdapterChannel)) radio += "  ch " + std::to_string(i(ctx, base + kNetAdapterChannel));
+    if (ok(ctx, base + kNetAdapterWidthMhz)) radio += "  " + std::to_string(i(ctx, base + kNetAdapterWidthMhz)) + " MHz";
+    pen.text(cx, top + 62, radio, 14, kTextMuted);
+    const std::string ip = text(ctx, base + kNetAdapterIp);
+    pen.text(cx, top + 82, std::string(t.ip) + (ip.empty() ? "--" : ip), 14, kTextMuted);
+    return kLinkBlockFullH;
+}
+
+void drawNetwork(const Pen& pen, double x, double y, const WidgetInstance& w, const WidgetContext& ctx) {
     const Thresholds& th = ctx.thresholds;
     const WidgetText& t = texts(ctx);
     const double cx = x + kInX;
     const double right = x + kInR;
     const double top = y + kTop;
+    if (moreRows(w)) {
+        double by = top + kLinkBlockTop;
+        by += drawLinkBlock(pen, x, by, t.linkDongle, kNetDongleBase, ctx);
+        drawLinkBlock(pen, x, by, t.linkHome, kNetHomeBase, ctx);
+        return;
+    }
     const bool up = ok(ctx, kNetInterfaceUp) && i(ctx, kNetInterfaceUp) != 0;
     const bool connected = up && i(ctx, kNetConnected) != 0;
     // Which link, after the title: the dongle if it has a peer, otherwise home Wi-Fi
@@ -682,9 +1057,10 @@ double drawController(const Pen& pen, double x, double y, const char* label, uin
     return x - start;
 }
 
-void drawGeneral(const Pen& pen, double x, double y, const WidgetContext& ctx) {
+void drawGeneral(const Pen& pen, double x, double y, const WidgetInstance& w, const WidgetContext& ctx) {
     const WidgetText& t = texts(ctx);
     const double cx = x + kInX + 8;
+    const double right = x + kInR;
     const double top = y + kTop;
     const double valueX = cx + 110;
     double ry = top + 20 + kLineH;
@@ -697,6 +1073,58 @@ void drawGeneral(const Pen& pen, double x, double y, const WidgetContext& ctx) {
         ry += kLineH;
         pen.text(cx, ry, t.time, 15, kTextMuted);
         pen.text(valueX, ry, clockText(text(ctx, kClock), ctx.clockFormat), 16, kText, true);
+    }
+    if (!moreRows(w)) return;
+    // Compact off: uptime, the app in front, and what this overlay costs
+    ry += kLineH;
+    pen.text(cx, ry, t.uptime, 15, kTextMuted);
+    pen.text(valueX, ry, ok(ctx, kUptimeS) ? durationText(static_cast<double>(i(ctx, kUptimeS))) : naText(ctx, kUptimeS),
+             15, kText);
+    ry += kLineH;
+    pen.text(cx, ry, t.app, 15, kTextMuted);
+    std::string app = text(ctx, kSceneAppName);
+    if (app.empty()) app = ok(ctx, kScenePid) ? t.noApp : naText(ctx, kSceneAppName);
+    pen.text(valueX, ry, ellipsize(pen, app, 15, right - valueX), 15, kText);
+    ry += kLineH;
+    pen.text(cx, ry, t.hudCost, 15, kTextMuted);
+    // Own power is an estimate (own CPU share × CPU rails): always shown with "≈"
+    double hx = valueX;
+    hx += pen.text(hx, ry, num(f(ctx, kSelfCpuPct), 1) + "% CPU  ·  " + num(f(ctx, kSelfRssMib), 0) + " MiB  ·  ", 15,
+                   kText);
+    hx += drawApprox(pen, hx, ry, 15, kText);
+    pen.text(hx, ry, num(f(ctx, kSelfPowerW), 2) + " W", 15, kText);
+}
+
+void drawProcessList(const Pen& pen, double x, double y, const WidgetInstance& w, const WidgetContext& ctx) {
+    const WidgetText& t = texts(ctx);
+    const bool cpu = w.type == WidgetType::CpuItems;
+    const double cx = x + kInX;
+    const double right = x + kInR;
+    const double top = y + kTop;
+    pen.text(right, top + 17, cpu ? t.pctOfCore : t.rss, 13, kTextMuted, false, true);
+    const uint16_t rowsId = cpu ? kCpuItemsRows : kRamItemsRows;
+    if (ctx.processes == nullptr || !ok(ctx, rowsId)) {
+        const bool first = reasonOf(ctx, rowsId) == Reason::NotSampledYet;
+        pen.text(cx + 8, top + kListTop + kRowH, first ? std::string(t.waiting) : naText(ctx, rowsId), 14, kTextMuted);
+        return;
+    }
+    const std::vector<ProcessItem>& rows = cpu ? ctx.processes->byCpu : ctx.processes->byRam;
+    // A bad hide_rules.json edit takes the last row: the rules in use are the last ones that loaded
+    const bool hint = w.hideSystem && ctx.processes->hideRulesError;
+    if (hint) {
+        const double ry = top + kListTop + kRowH * static_cast<double>(std::max<uint32_t>(w.maxItems, 1));
+        pen.text(cx + 8, ry, ellipsize(pen, t.hideRulesError, 13, right - (cx + 8)), 13, kTextMuted);
+    }
+    // The HUD isn't scrollable: the top rows that fit
+    const size_t n = std::min<size_t>(rows.size(), hint && w.maxItems > 0 ? w.maxItems - 1 : w.maxItems);
+    for (size_t k = 0; k < n; ++k) {
+        const ProcessItem& r = rows[k];
+        const double ry = top + kListTop + kRowH * static_cast<double>(k + 1);
+        const std::string v = cpu ? num(r.cpuCorePct, 1) + "%" : num(r.rssMiB, 0) + " MiB";
+        const double vw = pen.text(right, ry, v, 14, kText, false, true);
+        std::string name = r.name;
+        if (r.count > 1) name += " ×" + std::to_string(r.count);
+        pen.text(cx + 8, ry, ellipsize(pen, name, 14, right - vw - 12 - (cx + 8)), 14, k == 0 ? kText : kTextMuted);
     }
 }
 
@@ -725,23 +1153,38 @@ uint64_t widgetSignature(const WidgetInstance& w, const WidgetContext& ctx) {
     mix(&ctx.graphSeconds, sizeof(ctx.graphSeconds));
     mix(&ctx.clockFormat, sizeof(ctx.clockFormat));
     mix(&ctx.language, sizeof(ctx.language));
+    if (isProcessList(w.type) && ctx.processes != nullptr) {
+        mix(&ctx.processes->generation, sizeof(ctx.processes->generation));
+    }
     const bool hasStore = ctx.store != nullptr;
+    const bool hasLists = ctx.processes != nullptr;
     mix(&hasStore, sizeof(hasStore));
+    mix(&hasLists, sizeof(hasLists));
     return h;
 }
 
 int widgetHeight(const WidgetInstance& w, const WidgetContext* ctx) {
+    const bool more = moreRows(w);
     switch (w.type) {
-        case WidgetType::Frame: return kGraphCardH;
+        case WidgetType::Frame: return more ? kFrameFullH : kGraphCardH;
         case WidgetType::GpuRam: return kGraphCardH;
-        case WidgetType::Power: return kGraphCardH;
+        case WidgetType::Power: return more ? kPowerFullH : kGraphCardH;
         // Compact cards keep only their top row (Battery: % and the W line)
         case WidgetType::Temp: return w.compact ? kGraphCardH : kTempFullH;
-        case WidgetType::Cpu: return kCpuH;
-        case WidgetType::Battery: return w.compact ? kBatteryCompactH : kBatteryFullH;
-        case WidgetType::Network: return ctx && !networkExpanded(*ctx) ? kNetworkShortH : kNetworkFullH;
+        case WidgetType::Cpu: return more ? cpuFullHeight(ctx) : kCpuH;
+        case WidgetType::Battery:
+            if (w.compact) return kBatteryCompactH;
+            // Without values: the rows of a Frame on battery (charge, flow, to empty, health, charger, set current, USB)
+            return static_cast<int>(kTop) + 106 + (ctx ? batteryRows(*ctx).count() : 7) * static_cast<int>(kRowH) + 10;
+        case WidgetType::CpuItems:
+        case WidgetType::RamItems:
+            return static_cast<int>(kTop + kListTop + kRowH * static_cast<double>(w.maxItems)) + 10;
+        case WidgetType::Network:
+            if (more) return networkFullHeight(ctx);
+            return ctx && !networkExpanded(*ctx) ? kNetworkShortH : kNetworkFullH;
         case WidgetType::General: {
-            const int rows = ctx && ctx->clockFormat == 0 ? 1 : 2;
+            int rows = ctx && ctx->clockFormat == 0 ? 1 : 2;
+            if (more) rows += 3;  // uptime, app, HUD cost
             return static_cast<int>(kTop) + 20 + rows * static_cast<int>(kLineH) + 12;
         }
         case WidgetType::None: break;
@@ -757,13 +1200,19 @@ void drawWidgetStatic(const Pen& pen, double x, double y, const WidgetInstance& 
                       int heightOverride) {
     staticCard(pen, x, y, heightOverride > 0 ? heightOverride : widgetHeight(w));
     if (hasGraph(w.type)) staticGraphBed(pen, x, y);
+    if (w.type == WidgetType::Frame && moreRows(w)) staticFrameTimesBeds(pen, x, y);
     staticTitle(pen, x, y, titleOf(w, widgetText(language)));
 }
 
 void pushWidgetHistory(const WidgetInstance& w, const WidgetContext& ctx, WidgetHistory& history) {
     const double keep = std::max(1, ctx.graphSeconds);
     switch (w.type) {
-        case WidgetType::Frame: history.a.push(ctx.now, f(ctx, kFrameAppFps), keep); break;
+        case WidgetType::Frame:
+            history.a.push(ctx.now, f(ctx, kFrameAppFps), keep);
+            // Kept while compact too, so turning Compact off shows full graphs at once
+            history.c.push(ctx.now, f(ctx, kFrameCpuMaxMs), keep);
+            history.d.push(ctx.now, f(ctx, kFrameGpuMaxMs), keep);
+            break;
         case WidgetType::GpuRam: history.a.push(ctx.now, f(ctx, kGpuBusyPct), keep); break;
         case WidgetType::Power: history.a.push(ctx.now, f(ctx, kPowerVphW), keep); break;
         case WidgetType::Temp:
@@ -777,14 +1226,16 @@ void pushWidgetHistory(const WidgetInstance& w, const WidgetContext& ctx, Widget
 void drawWidgetDynamic(const Pen& pen, double x, double y, const WidgetInstance& w, const WidgetContext& ctx,
                        const WidgetHistory& history) {
     switch (w.type) {
-        case WidgetType::Frame: drawFrame(pen, x, y, ctx, history); break;
-        case WidgetType::Cpu: drawCpu(pen, x, y, ctx); break;
+        case WidgetType::Frame: drawFrame(pen, x, y, w, ctx, history); break;
+        case WidgetType::Cpu: drawCpu(pen, x, y, w, ctx); break;
         case WidgetType::GpuRam: drawGpuRam(pen, x, y, ctx, history); break;
-        case WidgetType::Power: drawPower(pen, x, y, ctx, history); break;
+        case WidgetType::Power: drawPower(pen, x, y, w, ctx, history); break;
         case WidgetType::Battery: drawBattery(pen, x, y, w, ctx); break;
         case WidgetType::Temp: drawTemp(pen, x, y, w, ctx, history); break;
-        case WidgetType::Network: drawNetwork(pen, x, y, ctx); break;
-        case WidgetType::General: drawGeneral(pen, x, y, ctx); break;
+        case WidgetType::CpuItems:
+        case WidgetType::RamItems: drawProcessList(pen, x, y, w, ctx); break;
+        case WidgetType::Network: drawNetwork(pen, x, y, w, ctx); break;
+        case WidgetType::General: drawGeneral(pen, x, y, w, ctx); break;
         case WidgetType::None: break;
     }
 }

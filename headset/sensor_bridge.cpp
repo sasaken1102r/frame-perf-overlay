@@ -3,6 +3,8 @@
 #include "system_metrics.h"
 #include "vr_overlay.h"
 
+#include <algorithm>
+
 using frame_perf_overlay::Reason;
 using frame_perf_overlay::SourceId;
 using frame_perf_overlay::WidgetType;
@@ -28,14 +30,102 @@ SensorBridge::SensorBridge(Sensors& sensors, VrOverlay* vr, frame_perf_overlay::
     : sensors_(sensors), vr_(vr), store_(store) {}
 
 std::vector<WidgetType> SensorBridge::allWidgets() {
-    return {WidgetType::Frame,   WidgetType::Cpu,  WidgetType::GpuRam,  WidgetType::Power,
-            WidgetType::Battery, WidgetType::Temp, WidgetType::Network, WidgetType::General};
+    return {WidgetType::Frame,    WidgetType::Cpu,      WidgetType::GpuRam,  WidgetType::Power,
+            WidgetType::Battery,  WidgetType::Temp,     WidgetType::CpuItems, WidgetType::RamItems,
+            WidgetType::Network,  WidgetType::General};
 }
 
 void SensorBridge::registerSources(frame_perf_overlay::Scheduler& scheduler) {
     registerSystemSources(scheduler, sensors_, store_);
     scheduler.addSource(SourceId::FrameTiming, [this](double now, bool) { readFrameTiming(now); });
     scheduler.addSource(SourceId::Controllers, [this](double now, bool) { readControllers(now); });
+    scheduler.addSource(SourceId::Processes, [this](double now, bool resumed) { readProcesses(now, resumed); });
+    scheduler.addSource(SourceId::SceneApp, [this](double now, bool) { refreshSceneApp(now); });
+}
+
+void SensorBridge::setProcessOptions(const frame_perf_overlay::Layout& layout) {
+    ProcessListOptions options;
+    options.cpuMax = 0;
+    options.ramMax = 0;
+    bool ramSum = false;
+    for (const frame_perf_overlay::LayoutColumn& column : layout.columns) {
+        for (const frame_perf_overlay::WidgetInstance& w : column.widgets) {
+            if (w.type == WidgetType::CpuItems) {
+                options.cpuMax = std::max<size_t>(options.cpuMax, w.maxItems);
+                options.sumSameName = options.sumSameName || w.sumSameName;
+                options.cpuHideSystem = options.cpuHideSystem || w.hideSystem;
+            } else if (w.type == WidgetType::RamItems) {
+                options.ramMax = std::max<size_t>(options.ramMax, w.maxItems);
+                ramSum = ramSum || w.sumSameName;
+                options.ramHideSystem = options.ramHideSystem || w.hideSystem;
+            }
+        }
+    }
+    options.ramSumSameName = ramSum ? 1 : 0;
+    processOptions_ = options;
+}
+
+void SensorBridge::readProcesses(double now, bool resumed) {
+    // CPU % is a delta: after a pause, start a fresh one rather than average over the pause
+    if (resumed) processes_.reset();
+    const ProcessLists& l = processes_.scan(now, processOptions_);
+    const auto convert = [](const std::vector<ProcessRow>& rows) {
+        std::vector<frame_perf_overlay::ProcessItem> out;
+        out.reserve(rows.size());
+        for (const ProcessRow& r : rows) {
+            frame_perf_overlay::ProcessItem item;
+            item.name = r.name;
+            item.pid = r.pid;
+            item.count = r.count;
+            item.cpuCorePct = r.cpuCorePct;
+            item.rssMiB = r.rssMiB;
+            out.push_back(std::move(item));
+        }
+        return out;
+    };
+    processView_.byCpu = convert(l.byCpu);
+    processView_.byRam = convert(l.byRam);
+    processView_.cpuValid = l.cpuValid;
+    processView_.hideRulesError = l.hideRulesError;
+    ++processView_.generation;
+    if (l.scanned == 0) {
+        for (uint16_t id : {metric::kProcScanned, metric::kProcVanished, metric::kProcScanMs, metric::kCpuItemsRows,
+                            metric::kRamItemsRows}) {
+            store_.setNa(id, Reason::ReadFailed, now);
+        }
+        return;
+    }
+    store_.setI32(metric::kProcScanned, l.scanned, now);
+    store_.setI32(metric::kProcVanished, l.vanished, now);
+    store_.setF32(metric::kProcScanMs, l.scanMs, now);
+    if (l.cpuValid) {
+        store_.setI32(metric::kCpuItemsRows, static_cast<int32_t>(l.byCpu.size()), now);
+    } else {
+        store_.setNa(metric::kCpuItemsRows, Reason::NotSampledYet, now);
+    }
+    store_.setI32(metric::kRamItemsRows, static_cast<int32_t>(l.byRam.size()), now);
+}
+
+void SensorBridge::refreshSceneApp(double now) {
+    SceneApp app;
+    if (vr_ == nullptr || !vr_->readSceneApp(app)) {
+        for (uint16_t id : {metric::kSceneAppKey, metric::kSceneAppName, metric::kScenePid}) {
+            store_.setNa(id, Reason::NoSteamVr, now);
+        }
+        return;
+    }
+    store_.setI32(metric::kScenePid, static_cast<int32_t>(app.pid), now);
+    if (app.key.empty()) {  // the compositor (SteamVR Home) is showing
+        store_.setNa(metric::kSceneAppKey, Reason::NotConnected, now);
+        store_.setNa(metric::kSceneAppName, Reason::NotConnected, now);
+        return;
+    }
+    store_.setText(metric::kSceneAppKey, app.key, now);
+    if (app.name.empty()) {
+        store_.setNa(metric::kSceneAppName, Reason::NotConnected, now);
+    } else {
+        store_.setText(metric::kSceneAppName, app.name, now);
+    }
 }
 
 void SensorBridge::readFrameTiming(double now) {

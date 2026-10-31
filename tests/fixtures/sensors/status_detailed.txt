@@ -1,0 +1,25 @@
+JEITA: 0
+CV: 0
+CC: 0
+ICL: 0
+Boost: 0
+Buck: 0
+USB: 0
+Input OK: 0
+Buck OK: 0
+Temp OK: 0
+BATT OK: 0
+CHG Ctrl OK: 0
+USB UV: 1
+USB OV: 0
+USB Suspend: 0
+IMP Trigger: 0
+Buck SS Done: 0
+Buck OC: 0
+VPH UV: 0
+Die Temp Bad: 0
+JEITA Cold: 0
+JEITA Hot: 0
+QPH VBAT1 OK: 0
+QPH VIN OK: 0
+QPH2: 0

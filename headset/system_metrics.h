@@ -9,7 +9,7 @@
 
 /**
  * Registers a reader for each system source: CpuLoad, CpuClock, GpuClock, Ram, Temps, BoardTemps, Throttle, Fan,
- * Power, Battery, Network, Clock.
+ * Power, Battery, Network, Clock, Uptime, SelfCost.
  * @param scheduler where to register
  * @param sensors discover() already called; must outlive the scheduler
  * @param store where values go; must outlive the scheduler

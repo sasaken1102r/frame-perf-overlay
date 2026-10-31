@@ -5,6 +5,7 @@
 
 #include <cairo.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -47,7 +48,7 @@ std::string pngDir() {
     return dir;
 }
 
-WidgetInstance inst(W type, bool compact = false) {
+WidgetInstance inst(W type, bool compact = true) {
     WidgetInstance w;
     w.type = type;
     w.compact = compact;
@@ -177,14 +178,12 @@ void testNetworkShrinksWhenNotExpanded() {
 }
 
 void testCompactHeights() {
-    CHECK(widgetHeight(inst(W::Temp)) == 154);
+    CHECK(widgetHeight(inst(W::Temp, false)) == 198);  // the card with its extra rows
     CHECK(widgetHeight(inst(W::Temp, true)) == 102);
-    CHECK(widgetHeight(inst(W::Battery)) == 142);
+    CHECK(widgetHeight(inst(W::Battery, false)) > 142);
     CHECK(widgetHeight(inst(W::Battery, true)) == 88);
-    // the others have no compact card
-    for (const W type : {W::Frame, W::Power, W::GpuRam, W::Cpu, W::Network, W::General}) {
-        CHECK(widgetHeight(inst(type, true)) == widgetHeight(inst(type)));
-    }
+    // GPU & RAM has no switch
+    CHECK(widgetHeight(inst(W::GpuRam, true)) == widgetHeight(inst(W::GpuRam, false)));
 
     // no jitter: values moving doesn't move a height or the grid
     MetricStore low;
@@ -200,7 +199,7 @@ void testCompactHeights() {
     highCtx.now = kNow;
     Layout layout;
     layout.columns.resize(2);
-    layout.columns[0].widgets = {inst(W::Frame), inst(W::Temp)};
+    layout.columns[0].widgets = {inst(W::Frame), inst(W::Temp, false)};
     layout.columns[1].widgets = {inst(W::Power), inst(W::Battery, true)};
     CHECK(sameGridGeometry(layoutGrid(layout, &lowCtx), layoutGrid(layout, &highCtx)));
 
@@ -209,13 +208,13 @@ void testCompactHeights() {
     toggled.columns[0].widgets[1].compact = true;
     CHECK(!sameGridGeometry(layoutGrid(layout, &lowCtx), layoutGrid(toggled, &lowCtx)));
     CHECK(layoutGrid(toggled, &lowCtx).slots[1].h == 102);
-    CHECK(layoutGrid(layout, &lowCtx).slots[1].h == 154);
+    CHECK(layoutGrid(layout, &lowCtx).slots[1].h == 198);
 
     // Compact Temp keeps the graph: its graph bed (the panel's background colour, sunk into the card) is where the
     // full card's is. The card sits at (8, 8); the bed starts 202 px in and 10 px down, 84 px tall
     MetricStore none;
     const Pixels compact = renderPx(oneWidget(inst(W::Temp, true)), none, "temp-compact.png");
-    const Pixels full = renderPx(oneWidget(inst(W::Temp)), none);
+    const Pixels full = renderPx(oneWidget(inst(W::Temp, false)), none);
     const auto rgbAt = [](const Pixels& px, int width, int x, int y) {
         const size_t i = (static_cast<size_t>(y) * width + x) * 4;
         return (unsigned(px[i]) << 16) | (unsigned(px[i + 1]) << 8) | px[i + 2];
@@ -505,6 +504,381 @@ void testNetworkInterfaceDown() {
     CHECK(render(WidgetLanguage::En) != render(WidgetLanguage::Ja));
 }
 
+// ---- Readouts (PR 2): compact cards stay as they were, Compact off adds rows, the lists ----
+
+unsigned pixelHash(cairo_surface_t* surface) {
+    cairo_surface_flush(surface);
+    const uint8_t* p = cairo_image_surface_get_data(surface);
+    const size_t n = size_t(cairo_image_surface_get_stride(surface)) * size_t(cairo_image_surface_get_height(surface));
+    unsigned h = 2166136261u;
+    for (size_t k = 0; k < n; ++k) h = (h ^ p[k]) * 16777619u;
+    return h;
+}
+
+/** The card with its extra rows (Compact switched off). */
+WidgetInstance rowsCard(W type) {
+    return inst(type, false);
+}
+
+WidgetContext ctxFor(const MetricStore& store, int clockFormat = 24) {
+    WidgetContext ctx;
+    ctx.store = &store;
+    ctx.now = kNow;
+    ctx.clockFormat = clockFormat;
+    return ctx;
+}
+
+// The default 2-column layout and every card in it: the heights v0.4.0 drew, with and without a context
+void testV040HeightsUnchanged() {
+    const Layout def = defaultLayout();
+    MetricStore empty;
+    MetricStore connected;
+    connected.setEnum(metric::kNetInterfaceUp, 1, kNow);
+    connected.setEnum(metric::kNetConnected, 1, kNow);
+    const WidgetContext emptyCtx = ctxFor(empty);
+    const WidgetContext connectedCtx = ctxFor(connected);
+    const GridGeometry plain = layoutGrid(def);
+    const GridGeometry noLink = layoutGrid(def, &emptyCtx);
+    const GridGeometry linked = layoutGrid(def, &connectedCtx);
+    CHECK(plain.width == 1024 && plain.height == 422 && plain.columns == 2 && plain.slots.size() == 8);
+    CHECK(noLink.width == 1024 && noLink.height == 422);
+    CHECK(linked.width == 1024 && linked.height == 422);
+    for (const GridGeometry* g : {&plain, &noLink, &linked}) {
+        for (const WidgetSlot& s : g->slots) {
+            int want = 0;
+            switch (s.widget.type) {
+                case W::Frame: case W::Power: case W::GpuRam: want = 102; break;
+                case W::Temp: want = 102; break;     // compact in the default layout
+                case W::Cpu: want = 64; break;
+                case W::Battery: want = 88; break;   // compact
+                case W::Network: want = g == &noLink ? 64 : 88; break;
+                case W::General: want = 82; break;
+                default: break;
+            }
+            CHECK(s.h == want);
+        }
+    }
+    CHECK(widgetHeight(inst(W::Cpu), &emptyCtx) == 64);
+    const WidgetContext noClock = ctxFor(empty, 0);
+    CHECK(widgetHeight(inst(W::General), &emptyCtx) == 82 && widgetHeight(inst(W::General), &noClock) == 60);
+    CHECK(widgetHeight(inst(W::Network), &connectedCtx) == 88 && widgetHeight(inst(W::Network), &emptyCtx) == 64);
+    CHECK(widgetHeight(inst(W::Frame)) == 102 && widgetHeight(inst(W::Power)) == 102);
+    CHECK(widgetHeight(inst(W::Temp)) == 102 && widgetHeight(inst(W::Battery)) == 88);
+}
+
+// A layout saved by v0.4.0 (a key only on compact Temp / Battery) loads clean and writes back the same bytes
+void testV040SavedLayout() {
+    const std::string saved =
+        R"({"version":7,"columns":[[{"type":"frame"},{"type":"temp","compact":true},{"type":"battery","compact":true},)"
+        R"({"type":"cpu"}],[{"type":"gpu_ram"},{"type":"power"},{"type":"network"},{"type":"general"}]]})";
+    Layout layout;
+    std::vector<std::string> warnings;
+    std::string error;
+    CHECK(parseLayoutText(saved, layout, warnings, error) && warnings.empty());
+    CHECK(layoutToJson(layout, 0) == saved);
+    for (const LayoutColumn& c : layout.columns) {
+        for (const WidgetInstance& w : c.widgets) CHECK(w.compact || !hasCompactView(w.type));
+    }
+    const GridGeometry g = layoutGrid(layout);
+    CHECK(g.slots[0].h == 102 && g.slots[1].h == 102 && g.slots[2].h == 88 && g.slots[3].h == 64);
+
+    // and the built-in default layout
+    const std::string def = layoutToJson(defaultLayout(), 0);
+    CHECK(def.find("details") == std::string::npos && def.find("adapter") == std::string::npos);
+    CHECK(def.find("false") == std::string::npos);
+    Layout back;
+    warnings.clear();
+    CHECK(parseLayoutText(def, back, warnings, error) && warnings.empty() && layoutToJson(back, 0) == def);
+}
+
+// A v0.4.0 file with a non-compact Battery / Temp (no key) now shows the card with its extra rows: the documented change
+void testV040FullCardsGainRows() {
+    Layout layout;
+    std::vector<std::string> warnings;
+    std::string error;
+    CHECK(parseLayoutText(R"({"columns":[[{"type":"temp"},{"type":"battery"}]]})", layout, warnings, error));
+    CHECK(warnings.empty());
+    const WidgetInstance& temp = layout.columns[0].widgets[0];
+    const WidgetInstance& battery = layout.columns[0].widgets[1];
+    CHECK(!temp.compact && !battery.compact);
+    const GridGeometry g = layoutGrid(layout);
+    CHECK(g.slots[0].h == 198);
+    CHECK(g.slots[1].h > 142);
+}
+
+// Compact off: every type with the switch gets its extra rows
+void testCompactOffHeights() {
+    MetricStore connected;
+    connected.setEnum(metric::kNetInterfaceUp, 1, kNow);
+    connected.setEnum(metric::kNetConnected, 1, kNow);
+    const WidgetContext ctx = ctxFor(connected);
+    for (const W type : {W::Frame, W::Cpu, W::Power, W::Battery, W::Temp, W::Network, W::General}) {
+        CHECK(hasCompactView(type));
+        CHECK(widgetHeight(rowsCard(type), &ctx) > widgetHeight(inst(type), &ctx));
+        CHECK(widgetHeight(rowsCard(type)) > widgetHeight(inst(type)));
+    }
+    CHECK(!hasCompactView(W::GpuRam) && widgetHeight(rowsCard(W::GpuRam)) == widgetHeight(inst(W::GpuRam)));
+    CHECK(widgetHeight(rowsCard(W::Frame)) == 194 && widgetHeight(rowsCard(W::Temp)) == 198);
+    CHECK(widgetHeight(rowsCard(W::General), &ctx) == 82 + 3 * 22);
+    // the rows card draws and differs from the compact one
+    MetricStore store;
+    store.setF32(metric::kTempCpuC, 60, kNow);
+    CHECK(renderPx(oneWidget(rowsCard(W::Temp)), store) != renderPx(oneWidget(inst(W::Temp)), store));
+}
+
+// Compact on is the v0.4.0 card: the new metrics change nothing
+void testCompactOnIgnoresNewMetrics() {
+    MetricStore base;
+    base.setEnum(metric::kNetInterfaceUp, 1, kNow);
+    base.setEnum(metric::kNetConnected, 1, kNow);
+    base.setF32(metric::kCpuUsagePct, 30, kNow);
+    base.setF32(metric::kTempCpuC, 60, kNow);
+    base.setF32(metric::kBatteryPct, 50, kNow);
+    MetricStore more = base;
+    more.setF32(metric::kCpuCore0Pct, 40, kNow);
+    more.setF32(metric::kCpuCluster0Mhz, 1800, kNow);
+    more.setF32(metric::kTempNpuC, 50, kNow);
+    more.setF32(metric::kPowerUnmeasuredW, 2, kNow);
+    more.setI32(metric::kBatteryCycles, 100, kNow);
+    more.setI32(metric::kUptimeS, 1000, kNow);
+    more.setEnum(metric::kNetDongleBase + metric::kNetAdapterPresent, 1, kNow);
+    more.setEnum(metric::kNetDongleBase + metric::kNetAdapterConnected, 1, kNow);
+    for (const W type : {W::Frame, W::Cpu, W::Power, W::Battery, W::Temp, W::Network, W::General}) {
+        const Layout layout = oneWidget(inst(type));
+        CHECK(renderPx(layout, base) == renderPx(layout, more));
+    }
+}
+
+/** Sets one link block (kNetDongleBase / kNetHomeBase): present, connected, and some values when connected. */
+void setLinkBlock(MetricStore& s, uint16_t base, bool present, bool connected) {
+    s.setEnum(base + metric::kNetAdapterPresent, present ? 1 : 0, kNow);
+    s.setEnum(base + metric::kNetAdapterConnected, connected ? 1 : 0, kNow);
+    if (present && connected) {
+        s.setF32(base + metric::kNetAdapterSignalDbm, -50, kNow);
+        s.setF32(base + metric::kNetAdapterRxMbps, 20, kNow);
+        s.setF32(base + metric::kNetAdapterTxMbps, 2, kNow);
+        s.setText(base + metric::kNetAdapterIp, "192.168.1.47", kNow);
+        s.setText(base + metric::kNetAdapterIfName, "wlan0", kNow);
+    }
+}
+
+// Network with Compact on is the 0.4.0 combined card and ignores the per-link blocks
+void testNetworkDetailsOffIgnoresBlocks() {
+    MetricStore combined;
+    combined.setEnum(metric::kNetInterfaceUp, 1, kNow);
+    combined.setEnum(metric::kNetConnected, 1, kNow);
+    combined.setF32(metric::kNetSignalDbm, -48, kNow);
+    MetricStore withBlocks = combined;
+    setLinkBlock(withBlocks, metric::kNetDongleBase, true, true);
+    setLinkBlock(withBlocks, metric::kNetHomeBase, true, false);
+    for (const Layout& layout : {oneWidget(inst(W::Network)), defaultLayout()}) {
+        CHECK(renderPx(layout, combined) == renderPx(layout, withBlocks));
+    }
+    const WidgetContext ctx = ctxFor(withBlocks);
+    CHECK(widgetHeight(inst(W::Network), &ctx) == 88);
+}
+
+// Compact off: two stacked blocks, dongle then Wi-Fi; 92 px connected, 50 px otherwise
+void testNetworkDetailsBlocks() {
+    const WidgetInstance card = rowsCard(W::Network);
+    const auto heightFor = [&](bool dongleUp, bool homeUp) {
+        MetricStore s;
+        setLinkBlock(s, metric::kNetDongleBase, true, dongleUp);
+        setLinkBlock(s, metric::kNetHomeBase, true, homeUp);
+        const WidgetContext ctx = ctxFor(s);
+        return widgetHeight(card, &ctx);
+    };
+    CHECK(heightFor(true, true) == 6 + 24 + 92 + 92 + 6);  // 220
+    CHECK(heightFor(true, false) == 178 && heightFor(false, true) == 178);
+    CHECK(heightFor(false, false) == 136);
+    CHECK(widgetHeight(card) == 220);
+
+    // a block that was never read (or failed) shows its N/A reason, not "Not connected", at the same height
+    MetricStore notThere;
+    setLinkBlock(notThere, metric::kNetDongleBase, false, false);
+    setLinkBlock(notThere, metric::kNetHomeBase, false, false);
+    MetricStore unread;
+    MetricStore failed;
+    failed.setNa(metric::kNetDongleBase + metric::kNetAdapterPresent, Reason::ReadFailed, kNow);
+    failed.setNa(metric::kNetHomeBase + metric::kNetAdapterPresent, Reason::ReadFailed, kNow);
+    const WidgetContext c1 = ctxFor(notThere), c2 = ctxFor(unread), c3 = ctxFor(failed);
+    CHECK(widgetHeight(card, &c1) == 136 && widgetHeight(card, &c2) == 136 && widgetHeight(card, &c3) == 136);
+    const Layout layout = oneWidget(card);
+    CHECK(renderPx(layout, notThere) != renderPx(layout, unread));
+    CHECK(renderPx(layout, notThere) != renderPx(layout, failed));
+
+    // Compact off draws differently from on, and cairo stays happy
+    MetricStore both;
+    both.setEnum(metric::kNetInterfaceUp, 1, kNow);
+    both.setEnum(metric::kNetConnected, 1, kNow);
+    setLinkBlock(both, metric::kNetDongleBase, true, true);
+    setLinkBlock(both, metric::kNetHomeBase, true, true);
+    CHECK(renderPx(oneWidget(card), both) != renderPx(oneWidget(inst(W::Network)), both));
+    cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 512, 260);
+    cairo_t* cr = cairo_create(surface);
+    const Pen pen {cr, &fonts()};
+    const WidgetContext ctx = ctxFor(both);
+    drawWidgetDynamic(pen, 8, 8, card, ctx, WidgetHistory());
+    CHECK(cairo_status(cr) == CAIRO_STATUS_SUCCESS);
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+}
+
+// The old adapter key is gone: an unknown key, one warning, not written back
+void testNetworkJson() {
+    Layout out;
+    std::vector<std::string> warnings;
+    std::string error;
+    CHECK(parseLayoutText(R"({"columns":[[{"type":"network","details":true}]]})", out, warnings, error));
+    CHECK(warnings.size() == 1 && warnings[0].find("unknown key details") != std::string::npos);
+    const std::string text = layoutToJson(out, 0);
+    Layout back;
+    warnings.clear();
+    CHECK(parseLayoutText(text, back, warnings, error) && warnings.empty() && back.sameWidgets(out));
+    CHECK(layoutToJson(back, 0) == text);
+
+    warnings.clear();
+    CHECK(parseLayoutText(R"({"columns":[[{"type":"network","adapter":"home"}]]})", out, warnings, error));
+    CHECK(warnings.size() == 1 && warnings[0].find("unknown key adapter") != std::string::npos);
+    CHECK(out.columns[0].widgets.size() == 1);
+    CHECK(layoutToJson(out, 0).find("adapter") == std::string::npos);
+}
+
+// CPU / RAM items: 6 + 26 + 20 per row + 10, N/A without a scan, cairo stays happy
+void testProcessListWidgets() {
+    for (const W type : {W::CpuItems, W::RamItems}) {
+        WidgetInstance w = inst(type);
+        CHECK(widgetHeight(w) == 6 + 26 + 20 * 15 + 10);
+        w.maxItems = 3;
+        CHECK(widgetHeight(w) == 6 + 26 + 20 * 3 + 10);
+        w.maxItems = kMaxListItems;
+        CHECK(widgetHeight(w) == 6 + 26 + 20 * 50 + 10);
+        CHECK(isProcessList(type));
+    }
+    MetricStore store;
+    store.setNa(metric::kCpuItemsRows, Reason::NotSampledYet, kNow);
+    ProcessListsView lists;
+    lists.cpuValid = true;
+    lists.generation = 1;
+    lists.byCpu = {{"vrchat", 10, 1, 42.5, 800}, {"steamwebhelper", 0, 3, 12.0, 300}};
+    lists.byRam = {{"vrchat", 10, 1, 42.5, 800}};
+    store.setI32(metric::kCpuItemsRows, 2, kNow);
+    store.setI32(metric::kRamItemsRows, 1, kNow);
+
+    cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 512, 600);
+    cairo_t* cr = cairo_create(surface);
+    const Pen pen {cr, &fonts()};
+    const WidgetHistory history;
+    for (const W type : {W::CpuItems, W::RamItems}) {
+        WidgetContext ctx = ctxFor(store);  // ctx.processes == nullptr: N/A text
+        drawWidgetDynamic(pen, 8, 8, inst(type), ctx, history);
+        CHECK(cairo_status(cr) == CAIRO_STATUS_SUCCESS);
+        const unsigned na = pixelHash(surface);
+        ctx.processes = &lists;
+        drawWidgetDynamic(pen, 8, 8, inst(type), ctx, history);
+        CHECK(cairo_status(cr) == CAIRO_STATUS_SUCCESS);
+        CHECK(pixelHash(surface) != na);  // the rows drew something
+    }
+    // in the grid too, and a store that never saw the scan
+    const Layout layout = oneWidget(inst(W::CpuItems));
+    CHECK(renderPx(layout, MetricStore()) != renderPx(layout, store));
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+}
+
+// The hide_rules.json hint takes the card's last row, the card keeps its height; without Hide system it isn't drawn
+void testHideRulesErrorHint() {
+    MetricStore store;
+    store.setI32(metric::kCpuItemsRows, 2, kNow);
+    ProcessListsView lists;
+    lists.cpuValid = true;
+    lists.generation = 1;
+    lists.byCpu = {{"vrchat", 10, 1, 42.5, 800}, {"steamwebhelper", 0, 3, 12.0, 300}};
+    const auto draw = [&](bool hideSystem, bool error) {
+        lists.hideRulesError = error;
+        WidgetInstance card = inst(W::CpuItems);
+        card.hideSystem = hideSystem;
+        card.maxItems = 4;
+        cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 512, 200);
+        cairo_t* cr = cairo_create(surface);
+        const Pen pen {cr, &fonts()};
+        WidgetContext ctx = ctxFor(store);
+        ctx.processes = &lists;
+        drawWidgetDynamic(pen, 8, 8, card, ctx, WidgetHistory());
+        CHECK(cairo_status(cr) == CAIRO_STATUS_SUCCESS);
+        const unsigned hash = pixelHash(surface);
+        cairo_destroy(cr);
+        cairo_surface_destroy(surface);
+        return hash;
+    };
+    CHECK(draw(true, true) != draw(true, false));    // the hint is on the card
+    CHECK(draw(false, true) == draw(false, false));  // Hide system off: nothing to say
+    // same height either way
+    WidgetInstance card = inst(W::CpuItems);
+    card.hideSystem = true;
+    card.maxItems = 4;
+    WidgetContext ctx = ctxFor(store);
+    ctx.processes = &lists;
+    lists.hideRulesError = false;
+    const int plain = widgetHeight(card, &ctx);
+    lists.hideRulesError = true;
+    CHECK(widgetHeight(card, &ctx) == plain && plain == 6 + 26 + 20 * 4 + 10);
+}
+
+// ellipsize cuts at whole characters: always valid UTF-8, ends in "..", and keeps the longest prefix that fits
+bool validUtf8(const std::string& s) {
+    for (size_t i = 0; i < s.size();) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        const size_t n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+        if (n == 0 || i + n > s.size()) return false;
+        for (size_t k = 1; k < n; ++k) {
+            if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) return false;
+        }
+        i += n;
+    }
+    return true;
+}
+
+void testEllipsizeMixedText() {
+    cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 200, 40);
+    cairo_t* cr = cairo_create(surface);
+    const Pen pen {cr, &fonts()};
+    const double size = 15;
+    for (const bool bold : {false, true}) {
+        for (const std::string& s : {std::string("ab日本語cd"),
+                                    std::string("日本a語b"),
+                                    std::string("plain ascii text")}) {
+            const double full = pen.measure(s, size, bold);
+            CHECK(ellipsize(pen, s, size, full, bold) == s);  // fits as it is
+            CHECK(ellipsize(pen, s, size, full + 50, bold) == s);
+            // whole-character prefixes, longest first
+            std::vector<std::string> prefixes;
+            for (size_t i = 0; i < s.size(); ++i) {
+                if ((static_cast<unsigned char>(s[i]) & 0xC0) != 0x80) prefixes.push_back(s.substr(0, i));
+            }
+            std::reverse(prefixes.begin(), prefixes.end());  // longest proper prefix ... empty
+            for (double w = 0; w < full; w += 1.5) {
+                std::string want = "..";
+                for (const std::string& p : prefixes) {
+                    if (pen.measure(p + "..", size, bold) <= w) {
+                        want = p + "..";
+                        break;
+                    }
+                }
+                const std::string got = ellipsize(pen, s, size, w, bold);
+                CHECK(validUtf8(got));
+                CHECK(got.size() >= 2 && got.compare(got.size() - 2, 2, "..") == 0);
+                if (got != want) {
+                    std::printf("  ellipsize(w=%.1f) got [%s] want [%s]\n", w, got.c_str(), want.c_str());
+                    CHECK(got == want);
+                }
+            }
+        }
+    }
+    cairo_destroy(cr);
+    cairo_surface_destroy(surface);
+}
+
 // ---- Text with broken UTF-8 doesn't upset cairo ----
 
 void testInvalidUtf8Text() {
@@ -576,6 +950,17 @@ int main() {
     testGeneralClockOffShrinks();
     testNetworkShrinksWhenNotExpanded();
     testCompactHeights();
+    testV040HeightsUnchanged();
+    testV040SavedLayout();
+    testV040FullCardsGainRows();
+    testCompactOffHeights();
+    testCompactOnIgnoresNewMetrics();
+    testNetworkDetailsOffIgnoresBlocks();
+    testNetworkDetailsBlocks();
+    testNetworkJson();
+    testProcessListWidgets();
+    testHideRulesErrorHint();
+    testEllipsizeMixedText();
     testTitles();
     testEmptyStoreAllTypes();
     testDefaultFilled();

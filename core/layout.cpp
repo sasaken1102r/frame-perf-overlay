@@ -23,11 +23,13 @@ const KeyName kKeys[] = {
     {WidgetType::Power, "power"},
     {WidgetType::Battery, "battery"},
     {WidgetType::Temp, "temp"},
+    {WidgetType::CpuItems, "cpu_items"},
+    {WidgetType::RamItems, "ram_items"},
     {WidgetType::Network, "network"},
     {WidgetType::General, "general"},
 };
 
-WidgetInstance instance(WidgetType type, bool compact = false) {
+WidgetInstance instance(WidgetType type, bool compact = true) {
     WidgetInstance w;
     w.type = type;
     w.compact = compact;
@@ -36,8 +38,25 @@ WidgetInstance instance(WidgetType type, bool compact = false) {
 
 }  // namespace
 
+bool compactWhenMissing(WidgetType type) {
+    return type != WidgetType::Battery && type != WidgetType::Temp;
+}
+
 bool hasCompactView(WidgetType type) {
-    return type == WidgetType::Battery || type == WidgetType::Temp;
+    switch (type) {
+        case WidgetType::Frame:
+        case WidgetType::Cpu:
+        case WidgetType::Power:
+        case WidgetType::Battery:
+        case WidgetType::Temp:
+        case WidgetType::Network:
+        case WidgetType::General: return true;
+        default: return false;
+    }
+}
+
+bool isProcessList(WidgetType type) {
+    return type == WidgetType::CpuItems || type == WidgetType::RamItems;
 }
 
 Layout defaultLayout() {
@@ -58,6 +77,14 @@ std::vector<WidgetType> enabledWidgets(const Layout& layout) {
     std::vector<WidgetType> out;
     for (const LayoutColumn& column : layout.columns) {
         for (const WidgetInstance& w : column.widgets) out.push_back(w.type);
+    }
+    return out;
+}
+
+std::vector<bool> enabledCompact(const Layout& layout) {
+    std::vector<bool> out;
+    for (const LayoutColumn& column : layout.columns) {
+        for (const WidgetInstance& w : column.widgets) out.push_back(hasCompactView(w.type) && w.compact);
     }
     return out;
 }
@@ -96,8 +123,15 @@ std::string layoutToJson(const Layout& layout, int indent) {
             const char* key = widgetKey(w.type);
             if (key == nullptr) continue;
             out += std::string(i ? "," : "") + sp + "{" + sp + "\"type\":" + sp + "\"" + key + "\"";
-            // only when on, so a layout without it reads the same as before
-            if (w.compact && hasCompactView(w.type)) out += "," + sp + "\"compact\":" + sp + "true";
+            // only when it differs from what a missing key means, so a layout without it reads the same as before
+            if (hasCompactView(w.type) && w.compact != compactWhenMissing(w.type)) {
+                out += "," + sp + "\"compact\":" + sp + (w.compact ? "true" : "false");
+            }
+            if (isProcessList(w.type)) {
+                out += "," + sp + "\"max_items\":" + sp + std::to_string(w.maxItems);
+                if (w.sumSameName) out += "," + sp + "\"sum_same_name\":" + sp + "true";
+                if (w.hideSystem) out += "," + sp + "\"hide_system\":" + sp + "true";
+            }
             out += sp + "}";
         }
         out += (widgets.empty() ? "" : sp) + "]";
@@ -167,14 +201,33 @@ bool layoutFromJson(const JsonValue& value, Layout& out, std::vector<std::string
             seen.push_back(w.type);
             for (const auto& member : item.members) {
                 const std::string& k = member.first;
-                const bool known = k == "type" || (k == "compact" && hasCompactView(w.type));
+                const bool known = k == "type" || (k == "compact" && hasCompactView(w.type)) ||
+                                   ((k == "max_items" || k == "sum_same_name" || k == "hide_system") &&
+                                    isProcessList(w.type));
                 if (!known) warnings.push_back(at + ": unknown key " + k + " for " + type->text);
             }
-            if (hasCompactView(w.type)) {
-                if (const JsonValue* compact = item.get("compact")) {
-                    if (compact->isBool()) w.compact = compact->boolean;
-                    else warnings.push_back(at + ".compact must be true or false");
+            const auto readBool = [&](const char* key, bool& field) {
+                if (const JsonValue* v = item.get(key)) {
+                    if (v->isBool()) field = v->boolean;
+                    else warnings.push_back(at + "." + key + " must be true or false");
                 }
+            };
+            w.compact = compactWhenMissing(w.type);
+            if (hasCompactView(w.type)) readBool("compact", w.compact);
+            if (isProcessList(w.type)) {
+                if (const JsonValue* max = item.get("max_items")) {
+                    if (max->isNumber() && std::isfinite(max->number)) {
+                        const double clamped = std::clamp(std::round(max->number), 1.0, double(kMaxListItems));
+                        if (clamped != max->number) {
+                            warnings.push_back(at + ".max_items clamped to " + std::to_string(int(clamped)));
+                        }
+                        w.maxItems = static_cast<uint32_t>(clamped);
+                    } else {
+                        warnings.push_back(at + ".max_items must be a number");
+                    }
+                }
+                readBool("sum_same_name", w.sumSameName);
+                readBool("hide_system", w.hideSystem);
             }
             out1.widgets.push_back(w);
         }

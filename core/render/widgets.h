@@ -17,9 +17,28 @@ namespace frame_perf_overlay {
 /** Width of one grid column (px): the fixed panel's width. */
 constexpr int kColumnWidth = 512;
 
+/** One process-list row (a process, or every process of one name). */
+struct ProcessItem {
+    std::string name;         ///< what to show: comm, or the exe basename when comm is cut off (processDisplayName)
+    int pid = 0;              ///< 0 for a summed row
+    int count = 1;            ///< processes in this row
+    double cpuCorePct = 0.0;  ///< % of one core
+    double rssMiB = 0.0;
+};
+
+/** Both process lists, as of the last scan (the rows aren't metrics). */
+struct ProcessListsView {
+    std::vector<ProcessItem> byCpu;
+    std::vector<ProcessItem> byRam;
+    bool cpuValid = false;        ///< byCpu has a real interval behind it
+    bool hideRulesError = false;  ///< hide_rules.json's last load failed: the cards with Hide system say so
+    uint64_t generation = 0;      ///< bumped on every scan (the list widgets redraw only when it moves)
+};
+
 /** What every widget gets to draw with. */
 struct WidgetContext {
     const MetricStore* store = nullptr;
+    const ProcessListsView* processes = nullptr;  ///< nullptr = no lists (drawn as N/A)
     Thresholds thresholds;
     double now = 0.0;        ///< monotonic seconds (graph right edge)
     int graphSeconds = 30;   ///< graph window
@@ -31,6 +50,8 @@ struct WidgetContext {
 struct WidgetHistory {
     History a;  ///< main series (fps, vph W, CPU °C, GPU load %)
     History b;  ///< second series (GPU °C)
+    History c;  ///< Frame: worst CPU frame time per read (ms), for its graphs with Compact off
+    History d;  ///< Frame: worst GPU frame time per read (ms)
 };
 
 /** A throughput as text, value and unit apart so they can be styled differently. */
@@ -47,8 +68,14 @@ struct RateText {
 RateText formatRate(double mbps);
 
 /**
+ * Cuts text to fit maxWidth, ending in "..". Removes one whole UTF-8 character per step, so it never splits one.
+ * @return s itself if it fits, else the longest cut + ".." that fits ("..": nothing fits)
+ */
+std::string ellipsize(const Pen& pen, const std::string& s, double size, double maxWidth, bool bold = false);
+
+/**
  * Natural height of a widget's card (px). Network and General follow their visible rows when a context is
- * supplied. A Compact instance is shorter.
+ * supplied, and so do the non-compact CPU and Battery cards. A Compact instance is shorter, a non-compact one taller.
  * @param w the instance
  * @return height
  */
@@ -75,8 +102,8 @@ void drawWidgetStatic(const Pen& pen, double x, double y, const WidgetInstance& 
                       int heightOverride = 0);
 
 /**
- * What a widget instance's picture depends on: when each metric it owns was last set, and the settings it draws
- * with. Equal signatures = identical pixels, so the grid skips that widget.
+ * What a widget instance's picture depends on: when each metric it owns was last set, the process scan, and the
+ * settings it draws with. Equal signatures = identical pixels, so the grid skips that widget.
  * @param w the instance
  * @param ctx values
  * @return a hash

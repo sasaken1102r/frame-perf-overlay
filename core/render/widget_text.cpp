@@ -62,6 +62,41 @@ const WidgetText kJapanese = {
     "左手 ",
     "右手 ",
     "現在時刻",
+    // The full (non-compact) rows and the process lists (English until translated)
+    "CPU items",           // TODO(ja)
+    "RAM items",           // TODO(ja)
+    " ms  ·  max ",        // TODO(ja)
+    "capped from ",        // TODO(ja)
+    "Unmeasured",          // TODO(ja)
+    "Charge",              // TODO(ja)
+    "design",              // TODO(ja)
+    "To full",             // TODO(ja)
+    "To empty",            // TODO(ja)
+    "Health",              // TODO(ja)
+    "cycles",              // TODO(ja)
+    "Charger",             // TODO(ja)
+    "Set current",         // TODO(ja)
+    "USB",                 // TODO(ja)
+    "Unplugged",           // TODO(ja)
+    "PD offered",          // TODO(ja)
+    "Arriving",            // TODO(ja)
+    "Sag",                 // TODO(ja)
+    " high",               // TODO(ja)
+    "NPU",                 // TODO(ja)
+    "Camera",              // TODO(ja)
+    "Video",               // TODO(ja)
+    "Wi-Fi",               // TODO(ja)
+    "Flash",               // TODO(ja)
+    "nRF",                 // TODO(ja)
+    "Connector",           // TODO(ja)
+    "CPU % of one core",   // TODO(ja)
+    "RSS",                 // TODO(ja)
+    "IP ",                 // TODO(ja)
+    "Uptime",              // TODO(ja)
+    "App",                 // TODO(ja)
+    "none (SteamVR home)", // TODO(ja)
+    "HUD cost",            // TODO(ja)
+    "hide_rules.json has an error, using the last rules",  // TODO(ja)
 };
 
 const WidgetText kEnglish = {
@@ -120,6 +155,41 @@ const WidgetText kEnglish = {
     "L ",
     "R ",
     "Time",
+    // The full (non-compact) rows and the process lists
+    "CPU items",
+    "RAM items",
+    " ms  ·  max ",
+    "capped from ",
+    "Unmeasured",
+    "Charge",
+    "design",
+    "To full",
+    "To empty",
+    "Health",
+    "cycles",
+    "Charger",
+    "Set current",
+    "USB",
+    "Unplugged",
+    "PD offered",
+    "Arriving",
+    "Sag",
+    " high",
+    "NPU",
+    "Camera",
+    "Video",
+    "Wi-Fi",
+    "Flash",
+    "nRF",
+    "Connector",
+    "CPU % of one core",
+    "RSS",
+    "IP ",
+    "Uptime",
+    "App",
+    "none (SteamVR home)",
+    "HUD cost",
+    "hide_rules.json has an error, using the last rules",
 };
 
 }  // namespace

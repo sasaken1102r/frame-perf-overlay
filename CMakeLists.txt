@@ -48,8 +48,11 @@ add_executable(frame-perf-overlay
   headset/clock.cpp
   headset/config.cpp
   headset/sensors.cpp
+  headset/sensor_math.cpp
   headset/system_metrics.cpp
   headset/sensor_bridge.cpp
+  headset/process_scan.cpp
+  headset/hide_rules.cpp
   headset/dump_metrics.cpp
   headset/vr_overlay.cpp
   headset/vk_texture.cpp
@@ -129,7 +132,7 @@ if(BUILD_TESTING)
   target_link_libraries(runtime-test PRIVATE frame-perf-core PkgConfig::VULKAN)
   add_test(NAME runtime COMMAND runtime-test)
 
-  add_executable(sensors-test tests/sensors_test.cpp headset/sensors.cpp headset/wifi_link.cpp)
+  add_executable(sensors-test tests/sensors_test.cpp headset/sensors.cpp headset/sensor_math.cpp headset/wifi_link.cpp)
   target_include_directories(sensors-test PRIVATE headset)
   target_compile_options(sensors-test PRIVATE -Wall -Wextra)
   target_link_libraries(sensors-test PRIVATE PkgConfig::LIBNL)
@@ -179,10 +182,31 @@ if(BUILD_TESTING)
   add_test(NAME profile-store COMMAND profile-store-test)
 
   # The system sources end to end: a fake /sys + /proc tree, the scheduler, the metric store
-  add_executable(system-sources-test tests/system_sources_test.cpp headset/sensors.cpp headset/system_metrics.cpp
-                 headset/wifi_link.cpp)
+  add_executable(system-sources-test tests/system_sources_test.cpp headset/sensors.cpp headset/sensor_math.cpp
+                 headset/system_metrics.cpp headset/wifi_link.cpp)
   target_include_directories(system-sources-test PRIVATE headset)
   target_compile_options(system-sources-test PRIVATE -Wall -Wextra)
   target_link_libraries(system-sources-test PRIVATE frame-perf-core PkgConfig::LIBNL)
   add_test(NAME system-sources COMMAND system-sources-test)
+
+  # System sensor parsing and derivations: pure, fed from tests/fixtures/sensors
+  add_executable(sensor-math-test tests/sensor_math_test.cpp headset/sensor_math.cpp)
+  target_include_directories(sensor-math-test PRIVATE headset)
+  target_compile_options(sensor-math-test PRIVATE -Wall -Wextra)
+  add_test(NAME sensor-math COMMAND sensor-math-test ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/sensors)
+
+  # The /proc process scan (fixture trees) and the Wi-Fi channel / band / width / combine helpers
+  add_executable(process-wifi-test tests/process_wifi_test.cpp headset/process_scan.cpp headset/hide_rules.cpp
+                 headset/wifi_link.cpp)
+  target_include_directories(process-wifi-test PRIVATE headset)
+  target_compile_options(process-wifi-test PRIVATE -Wall -Wextra)
+  target_link_libraries(process-wifi-test PRIVATE frame-perf-core PkgConfig::LIBNL)
+  add_test(NAME process-wifi COMMAND process-wifi-test ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
+
+  # Hide system: glob / rules file / defaults vs the captured Frame process list / scanner drops hidden pids
+  add_executable(hide-rules-test tests/hide_rules_test.cpp headset/process_scan.cpp headset/hide_rules.cpp)
+  target_include_directories(hide-rules-test PRIVATE headset)
+  target_compile_options(hide-rules-test PRIVATE -Wall -Wextra)
+  target_link_libraries(hide-rules-test PRIVATE frame-perf-core)
+  add_test(NAME hide-rules COMMAND hide-rules-test ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
 endif()

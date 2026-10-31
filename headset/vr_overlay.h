@@ -44,13 +44,21 @@ struct VrEvents {
     bool keyboardDone = false;          ///< Done on the keyboard showKeyboard() opened; keyboardText has the text
     std::string keyboardText;
     bool keyboardClosed = false;        ///< the keyboard closed without Done
+    bool sceneAppChanged = false;       ///< VREvent_SceneApplicationChanged arrived: re-query the scene app
 
     /** イベントを捨て、次の読み取りに配列の容量を再利用する。 */
     void clear() {
-        quit = closeRequested = keyboardDone = keyboardClosed = false;
+        quit = closeRequested = keyboardDone = keyboardClosed = sceneAppChanged = false;
         pointer.clear();
         keyboardText.clear();
     }
+};
+
+/** The app drawing the scene (IVRApplications). */
+struct SceneApp {
+    uint32_t pid = 0;  ///< 0 = none (the compositor is showing)
+    std::string key;   ///< GetApplicationKeyByProcessId, or "process.<comm>" for a process with no app key
+    std::string name;  ///< VRApplicationProperty_Name_String, may be empty
 };
 
 /**
@@ -190,6 +198,14 @@ public:
      * @return 左右の電池。つながっていない側は present = false
      */
     ControllerStatus readControllers();
+
+    /**
+     * Reads the current scene app (GetCurrentSceneProcessId, then GetApplicationKeyByProcessId and the name).
+     * Works in the read-only connection too.
+     * @param app the result
+     * @return false when not connected
+     */
+    bool readSceneApp(SceneApp& app) const;
 
     /**
      * 診断用: 新しく届いたフレームの生のタイミング（フレーム番号・表示回数・再投影の印など）を

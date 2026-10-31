@@ -5,6 +5,7 @@
 #include "draw.h"
 #include "dump_metrics.h"
 #include "grid_renderer.h"
+#include "hide_rules.h"
 #include "i18n.h"
 #include "json.h"
 #include "layout.h"
@@ -548,9 +549,10 @@ frame_updater::UpdateStatus fakeUpdateStatus(const std::string& name) {
 
 /** What the widgets draw with. */
 frame_perf_overlay::WidgetContext widgetContext(const Config& config, const frame_perf_overlay::MetricStore& store,
-                                                double now) {
+                                                double now, const SensorBridge& bridge) {
     frame_perf_overlay::WidgetContext ctx;
     ctx.store = &store;
+    ctx.processes = &bridge.processLists();
     ctx.thresholds = config.thresholds;
     ctx.now = now;
     ctx.graphSeconds = config.graphSeconds;
@@ -564,9 +566,19 @@ double updateIntervalSec(const Config& config) {
     return std::max(100, config.updateIntervalMs) / 1000.0;
 }
 
-/** Applies a layout to the scheduler: a widget that isn't in it reads nothing. */
-void applyLayout(const frame_perf_overlay::Layout& layout, frame_perf_overlay::Scheduler& scheduler) {
-    scheduler.setEnabledWidgets(frame_perf_overlay::enabledWidgets(layout));
+/** Applies a layout to the scheduler (a widget that isn't in it reads nothing, a compact General no full-card rows)
+ *  and the process lists' settings. */
+void applyLayout(const frame_perf_overlay::Layout& layout, frame_perf_overlay::Scheduler& scheduler,
+                 SensorBridge& bridge) {
+    scheduler.setEnabledWidgets(frame_perf_overlay::enabledWidgets(layout),
+                                frame_perf_overlay::enabledCompact(layout));
+    bridge.setProcessOptions(layout);
+}
+
+/** hide_rules.json, next to config.json ("--config config.json" has no folder: "."). */
+std::string hideRulesPath(const std::string& configPath) {
+    const size_t slash = configPath.find_last_of('/');
+    return (slash == std::string::npos ? std::string(".") : configPath.substr(0, slash)) + "/hide_rules.json";
 }
 
 /** --layout: reads a layout file (a layout object, or a whole config with a "layout" key). */
@@ -607,8 +619,10 @@ int runDumpPng(const Options& options) {
     frame_perf_overlay::MetricStore store;
     frame_perf_overlay::Scheduler scheduler;
     SensorBridge bridge(sensors, nullptr, store);
+    HideRules hideRules(hideRulesPath(options.configPath));  // read only here (no first-run write)
+    bridge.setHideRules(&hideRules);
     bridge.registerSources(scheduler);
-    applyLayout(layout, scheduler);
+    applyLayout(layout, scheduler, bridge);
     scheduler.setUpdateInterval(updateIntervalSec(config));
     scheduler.setDemand(offlineDemand());
 
@@ -630,7 +644,7 @@ int runDumpPng(const Options& options) {
         if (options.fakeWarnings) storeFakeWarnings(store, t);
         if (!options.fakeWifi.empty()) storeFakeWifi(store, options.fakeWifi, t);
         const double r0 = nowSeconds();
-        renderer.render(widgetContext(config, store, t));
+        renderer.render(widgetContext(config, store, t, bridge));
         renderMs = (nowSeconds() - r0) * 1e3;
     } while (!gStopRequested && nowSeconds() - start < options.dumpSeconds);
 
@@ -651,7 +665,7 @@ int runDumpPng(const Options& options) {
     for (int k = 0; k < options.benchCount; ++k) {
         renderer.markAllDirty();  // worst case: every widget redrawn
         const double t0 = nowSeconds();
-        changed += renderer.render(widgetContext(config, store, t0 + 0.5 * k)) ? 1 : 0;
+        changed += renderer.render(widgetContext(config, store, t0 + 0.5 * k, bridge)) ? 1 : 0;
         const double t1 = nowSeconds();
         renderer.toRgba();
         const double t2 = nowSeconds();
@@ -1003,15 +1017,25 @@ int runOverlay(const Options& options) {
     frame_perf_overlay::MetricStore store;
     frame_perf_overlay::Scheduler scheduler;
     SensorBridge bridge(sensors, &vr, store);
+    // Hide system's rules: the built-in list is written if the file is missing, an older file gets the newer
+    // built-ins (seedOrUpgrade); edits are picked up live
+    HideRules hideRules(hideRulesPath(options.configPath));
+    {
+        std::string error;
+        if (!hideRules.seedOrUpgrade(error)) {
+            std::fprintf(stderr, "[hide] Couldn't write %s: %s\n", hideRules.path().c_str(), error.c_str());
+        }
+    }
+    bridge.setHideRules(&hideRules);
     bridge.registerSources(scheduler);
-    applyLayout(config.layout, scheduler);  // a widget off in the layout reads nothing
+    applyLayout(config.layout, scheduler, bridge);  // a widget off in the layout reads nothing
     scheduler.setUpdateInterval(updateIntervalSec(config));  // the sources read every update follow update_interval_ms
     // Every live layout edit (the editor, the Profiles page) is a compare-and-set here
     LayoutAuthority layoutAuthority(
         config, [&watcher](const Config& c, std::string& error) { return watcher.save(c, error); },
         [&](const frame_perf_overlay::Layout& layout) {
             renderer.setLayout(layout);
-            applyLayout(layout, scheduler);
+            applyLayout(layout, scheduler, bridge);
         });
     // Layout profiles, in profiles/ next to the config file. Read once here; written only on a button press
     const size_t configSlash = watcher.path().find_last_of('/');  // "--config config.json" has no folder: "."
@@ -1202,7 +1226,7 @@ int runOverlay(const Options& options) {
                 renderer.invalidateStatic();  // the fonts may have changed
                 // A hand-edited layout takes effect at once (widgets off stop their sources)
                 if (renderer.setLayout(config.layout)) {
-                    applyLayout(config.layout, scheduler);
+                    applyLayout(config.layout, scheduler, bridge);
                     std::fprintf(stderr, "[layout] reloaded: version %u, %zu widget(s), panel %dx%d\n",
                                  config.layout.version, frame_perf_overlay::enabledWidgets(config.layout).size(),
                                  renderer.geometry().textureWidth, renderer.geometry().textureHeight);
@@ -1225,6 +1249,8 @@ int runOverlay(const Options& options) {
         // SteamVR itself quitting (VREvent_Quit) exits with 0. Close on the dashboard icon (VREvent_OverlayClosed)
         // is the user quitting, like Quit on the tab: exit code 3, so systemd doesn't restart us
         if (events.quit) break;
+        // General's App row at once, but only while it's wanted (General on the panel, someone looking)
+        if (events.sceneAppChanged) scheduler.requestRead(frame_perf_overlay::SourceId::SceneApp);
         // The keyboard opened by Rename on the Profiles page
         if (events.keyboardDone && !pendingRename.empty()) {
             std::string error;
@@ -1400,7 +1426,7 @@ int runOverlay(const Options& options) {
             if (scheduler.demand().hudShown && scheduler.demand().hmdInUse) {
                 const double c2 = cpuSeconds();
                 const double w2 = nowSeconds();
-                const bool changed = renderer.render(widgetContext(config, store, now));
+                const bool changed = renderer.render(widgetContext(config, store, now, bridge));
                 const double c3 = cpuSeconds();
                 const double w3 = nowSeconds();
                 bool sent = false;

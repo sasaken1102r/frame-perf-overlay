@@ -63,11 +63,11 @@ void testPaletteRules() {
         CHECK(!isRepeatable(t));
     }
     // Every real widget is offered; None and the reserved numbers are held back.
-    for (const W t : {W::Frame, W::Cpu, W::GpuRam, W::Power, W::Battery, W::Temp, W::Network, W::General}) {
+    for (const W t : {W::Frame, W::Cpu, W::GpuRam, W::Power, W::Battery, W::Temp, W::CpuItems, W::RamItems, W::Network,
+                      W::General}) {
         CHECK(isOfferedInPalette(t));
     }
     CHECK(!isOfferedInPalette(W::None));
-    CHECK(!isOfferedInPalette(static_cast<W>(7)));
     CHECK(!isOfferedInPalette(static_cast<W>(10)));
 
     const Layout layout = make({{W::Frame, W::Network}, {W::Network, W::Cpu}});
@@ -94,8 +94,10 @@ void testPaletteRules() {
 void testNewInstance() {
     const Layout layout = make({{W::Frame}});
     const WidgetInstance cpu = newInstance(W::Cpu, layout);
-    CHECK(cpu.type == W::Cpu && !cpu.compact);
-    CHECK(newInstance(W::Battery, layout).type == W::Battery);
+    CHECK(cpu.type == W::Cpu && cpu.compact);  // a palette add starts compact, whatever the type
+    for (const W t : {W::Frame, W::Power, W::Battery, W::Temp, W::Network, W::General, W::GpuRam}) {
+        CHECK(newInstance(t, layout).type == t && newInstance(t, layout).compact);
+    }
 }
 
 void testInsert() {

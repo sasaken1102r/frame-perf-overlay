@@ -1,9 +1,12 @@
 // 無線（直通回線と家の Wi-Fi）の読み取りの実装。
 #include "wifi_link.h"
 
+#include <arpa/inet.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
 #include <linux/nl80211.h>
 #include <net/if.h>
+#include <netinet/in.h>
 #include <netlink/genl/ctrl.h>
 #include <netlink/genl/genl.h>
 #include <unistd.h>
@@ -30,8 +33,12 @@ struct StationResult {
 struct InterfaceResult {
     unsigned apIndex = 0;
     std::string apName;
+    int apFreq = 0;
+    int apWidth = 0;
     unsigned stationIndex = 0;
     std::string stationName;
+    int stationFreq = 0;
+    int stationWidth = 0;
 };
 
 /**
@@ -120,19 +127,96 @@ int onInterface(nl_msg* message, void* arg) {
     const unsigned type = nla_get_u32(attrs[NL80211_ATTR_IFTYPE]);
     const unsigned index = nla_get_u32(attrs[NL80211_ATTR_IFINDEX]);
     const char* name = nla_get_string(attrs[NL80211_ATTR_IFNAME]);
+    // Only present while the interface is on a channel
+    const int freq =
+        attrs[NL80211_ATTR_WIPHY_FREQ] != nullptr ? static_cast<int>(nla_get_u32(attrs[NL80211_ATTR_WIPHY_FREQ])) : 0;
+    const int width = attrs[NL80211_ATTR_CHANNEL_WIDTH] != nullptr
+                          ? widthMhzFromNl80211(nla_get_u32(attrs[NL80211_ATTR_CHANNEL_WIDTH]))
+                          : 0;
     if (type == NL80211_IFTYPE_AP && result->apIndex == 0) {
         result->apIndex = index;
         result->apName = name;
+        result->apFreq = freq;
+        result->apWidth = width;
     } else if (type == NL80211_IFTYPE_STATION && result->stationIndex == 0) {
         result->stationIndex = index;
         result->stationName = name;
+        result->stationFreq = freq;
+        result->stationWidth = width;
     }
     return NL_SKIP;
+}
+
+/** @return the interface's first IPv4 address ("" if none) */
+std::string ipv4Of(const ifaddrs* list, const std::string& name) {
+    for (const ifaddrs* a = list; a != nullptr; a = a->ifa_next) {
+        if (a->ifa_addr == nullptr || a->ifa_addr->sa_family != AF_INET || name != a->ifa_name) continue;
+        char text[INET_ADDRSTRLEN] = {};
+        const auto* in = reinterpret_cast<const sockaddr_in*>(a->ifa_addr);
+        if (inet_ntop(AF_INET, &in->sin_addr, text, sizeof(text)) != nullptr) return text;
+    }
+    return "";
 }
 
 }  // namespace
 
 WifiInfo::WifiInfo() : signalDbm(kNaN), txLinkMbps(kNaN), rxLinkMbps(kNaN), rxMbps(kNaN), txMbps(kNaN) {}
+
+AdapterInfo::AdapterInfo() : rxMbps(kNaN), txMbps(kNaN), txLinkMbps(kNaN), rxLinkMbps(kNaN), signalDbm(kNaN) {}
+
+int channelFromFreq(int f) {
+    if (f == 2484) return 14;
+    if (f >= 2412 && f < 2484) return (f - 2407) / 5;
+    if (f == 5935) return 2;  // the one 6 GHz channel below 5950 MHz
+    if (f >= 5955 && f <= 7115) return (f - 5950) / 5;
+    if (f >= 4910 && f <= 5895) return (f - 5000) / 5;
+    if (f >= 58320 && f <= 70200) return (f - 56160) / 2160;
+    return 0;
+}
+
+unsigned bandFromFreq(int f) {
+    if (f >= 2400 && f < 2500) return 1;
+    if (f >= 4900 && f < 5925) return 2;
+    if (f >= 5925 && f <= 7125) return 3;
+    if (f >= 57000 && f <= 71000) return 4;
+    return 0;
+}
+
+int widthMhzFromNl80211(unsigned w) {
+    // enum nl80211_chan_width, by number so older headers without the newest names still build
+    switch (w) {
+        case 0: return 20;   // 20_NOHT
+        case 1: return 20;
+        case 2: return 40;
+        case 3: return 80;
+        case 4: return 160;  // 80P80
+        case 5: return 160;
+        case 6: return 5;
+        case 7: return 10;
+        case 8: return 1;
+        case 9: return 2;
+        case 10: return 4;
+        case 11: return 8;
+        case 12: return 16;
+        case 13: return 320;
+        default: return 0;
+    }
+}
+
+WifiInfo combineAdapters(const WifiAdapters& a) {
+    WifiInfo info;
+    info.interfaceUp = a.dongle.present || a.home.present;
+    const AdapterInfo* used = a.dongle.connected ? &a.dongle : (a.home.connected ? &a.home : nullptr);
+    if (used == nullptr) return info;
+    info.connected = true;
+    info.homeWifi = used == &a.home;
+    info.signalDbm = used->signalDbm;
+    info.txLinkMbps = used->txLinkMbps;
+    info.rxLinkMbps = used->rxLinkMbps;
+    info.rxMbps = used->rxMbps;
+    info.txMbps = used->txMbps;
+    return info;
+}
 
 WifiLink::Counters::Counters() : rxMbps(kNaN), txMbps(kNaN) {}
 
@@ -174,8 +258,14 @@ bool WifiLink::dump(int command, unsigned ifindex, int (*callback)(struct nl_msg
 void WifiLink::discoverInterfaces() {
     InterfaceResult found;
     if (!dump(NL80211_CMD_GET_INTERFACE, 0, onInterface, &found)) return;  // 失敗したら前の結果のまま
-    ap_ = {found.apIndex, found.apName};
-    station_ = {found.stationIndex, found.stationName};
+    ap_ = {found.apIndex, found.apName, found.apFreq, found.apWidth, ""};
+    station_ = {found.stationIndex, found.stationName, found.stationFreq, found.stationWidth, ""};
+    ifaddrs* list = nullptr;
+    if (getifaddrs(&list) == 0) {
+        if (ap_.ifindex != 0) ap_.ip = ipv4Of(list, ap_.name);
+        if (station_.ifindex != 0) station_.ip = ipv4Of(list, station_.name);
+        freeifaddrs(list);
+    }
 }
 
 bool WifiLink::readCounter(int fd, unsigned long long& value) {
@@ -229,7 +319,11 @@ void WifiLink::updateCounters(Counters& counters, const std::string& name, doubl
 }
 
 WifiInfo WifiLink::read(double now) {
-    WifiInfo info;
+    return combineAdapters(readAdapters(now));
+}
+
+WifiAdapters WifiLink::readAdapters(double now) {
+    WifiAdapters out;
     // インターフェースは種類で探す（ときどき探し直す。番号が消えていたらすぐ探し直す）
     const bool gone = (ap_.ifindex != 0 && if_nametoindex(ap_.name.c_str()) != ap_.ifindex) ||
                       (station_.ifindex != 0 && if_nametoindex(station_.name.c_str()) != station_.ifindex);
@@ -240,25 +334,27 @@ WifiInfo WifiLink::read(double now) {
     // 流量は両方とも毎回数える（切り替わった直後もすぐ出せるように）
     updateCounters(apCounters_, ap_.name, now);
     updateCounters(stationCounters_, station_.name, now);
-    info.interfaceUp = ap_.ifindex != 0 || station_.ifindex != 0;
 
-    // 1) 直通回線に相手（PC）がいればそちら
-    StationResult direct;
-    if (ap_.ifindex != 0) dump(NL80211_CMD_GET_STATION, ap_.ifindex, onStation, &direct);
-    // 2) いなければ、家の Wi-Fi の接続先（AP）
-    StationResult home;
-    home.managed = true;
-    if (!direct.found && station_.ifindex != 0) dump(NL80211_CMD_GET_STATION, station_.ifindex, onStation, &home);
-
-    const StationResult& used = direct.found ? direct : home;
-    const Counters& counters = direct.found ? apCounters_ : stationCounters_;
-    info.connected = used.found;
-    if (!info.connected) return info;
-    info.homeWifi = !direct.found;
-    info.signalDbm = used.signalDbm;
-    info.txLinkMbps = used.txLinkMbps;
-    info.rxLinkMbps = used.rxLinkMbps;
-    info.rxMbps = counters.rxMbps;
-    info.txMbps = counters.txMbps;
-    return info;
+    // Both stations every read: a Network widget may show either adapter (combineAdapters picks the dongle first)
+    const auto fill = [this](AdapterInfo& a, const Interface& itf, const Counters& counters, bool managed) {
+        a.present = itf.ifindex != 0;
+        if (!a.present) return;
+        a.ifName = itf.name;
+        a.ip = itf.ip;
+        a.freqMhz = itf.freqMhz;
+        a.widthMhz = itf.widthMhz;
+        a.rxMbps = counters.rxMbps;
+        a.txMbps = counters.txMbps;
+        StationResult s;
+        s.managed = managed;
+        if (dump(NL80211_CMD_GET_STATION, itf.ifindex, onStation, &s) && s.found) {
+            a.connected = true;
+            a.signalDbm = s.signalDbm;
+            a.txLinkMbps = s.txLinkMbps;
+            a.rxLinkMbps = s.rxLinkMbps;
+        }
+    };
+    fill(out.dongle, ap_, apCounters_, false);
+    fill(out.home, station_, stationCounters_, true);
+    return out;
 }

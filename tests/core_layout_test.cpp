@@ -21,7 +21,7 @@ int failures = 0;
 using namespace frame_perf_overlay;
 using W = WidgetType;
 
-WidgetInstance inst(W type, bool compact = false) {
+WidgetInstance inst(W type, bool compact = true) {
     WidgetInstance w;
     w.type = type;
     w.compact = compact;
@@ -42,12 +42,12 @@ void testDefaultLayout() {
     CHECK(layout.columns.size() == 2);
     CHECK(sameTypes(layout.columns[0], {W::Frame, W::Power, W::Temp, W::Cpu}));
     CHECK(sameTypes(layout.columns[1], {W::GpuRam, W::Network, W::Battery, W::General}));
-    // Temp and Battery are the short cards
+    // every card is the short one
     for (const LayoutColumn& column : layout.columns) {
-        for (const WidgetInstance& w : column.widgets) CHECK(w.compact == (w.type == W::Battery || w.type == W::Temp));
+        for (const WidgetInstance& w : column.widgets) CHECK(w.compact);
     }
     CHECK(hasCompactView(W::Battery) && hasCompactView(W::Temp));
-    CHECK(!hasCompactView(W::Frame) && !hasCompactView(W::Network) && !hasCompactView(W::General));
+    CHECK(hasCompactView(W::Frame) && hasCompactView(W::Network) && hasCompactView(W::General) && !hasCompactView(W::GpuRam));
 }
 
 void testRoundTrip() {
@@ -93,7 +93,7 @@ void testBadInput() {
 
     // widgets that only exist in other versions are skipped the same way
     warnings.clear();
-    CHECK(parseLayoutText(R"({"columns":[[{"type":"cpu_items"},{"type":"streaming"},{"type":"temp"}]]})", out,
+    CHECK(parseLayoutText(R"({"columns":[[{"type":"foo"},{"type":"streaming"},{"type":"temp"}]]})", out,
                           warnings, error));
     CHECK(out.columns[0].widgets.size() == 1 && out.columns[0].widgets[0].type == W::Temp);
     CHECK(warnings.size() == 2);
@@ -212,12 +212,19 @@ void testWidgetOffDropsRefs() {
     }
 }
 
-// The compact key
+// The compact key: every type with extra rows has the switch; Battery / Temp read a missing key as off (their
+// v0.4.0 full card), the others as on (their v0.4.0 card)
 void testCompact() {
-    // round trip, the key only emitted when on
+    CHECK(!compactWhenMissing(W::Battery) && !compactWhenMissing(W::Temp));
+    for (const W t : {W::Frame, W::Cpu, W::Power, W::Network, W::General}) CHECK(compactWhenMissing(t));
+    for (const W t : {W::Frame, W::Cpu, W::Power, W::Battery, W::Temp, W::Network, W::General}) CHECK(hasCompactView(t));
+    for (const W t : {W::GpuRam, W::CpuItems, W::RamItems}) CHECK(!hasCompactView(t));
+    CHECK(WidgetInstance().compact);  // a new instance is compact
+
+    // the key is written only when it differs from what a missing key means
     Layout l;
     l.columns.resize(1);
-    l.columns[0].widgets = {inst(W::Battery, true), inst(W::Temp), inst(W::Power)};
+    l.columns[0].widgets = {inst(W::Battery, true), inst(W::Temp, false), inst(W::Power, true)};
     const std::string text = layoutToJson(l, 0);
     size_t count = 0;
     for (size_t at = text.find("compact"); at != std::string::npos; at = text.find("compact", at + 1)) ++count;
@@ -230,30 +237,58 @@ void testCompact() {
     CHECK(parseLayoutText(text, back, warnings, error));
     CHECK(warnings.empty());
     CHECK(back.sameWidgets(l));
-    CHECK(back.columns[0].widgets[0].compact && !back.columns[0].widgets[1].compact);
+    CHECK(back.columns[0].widgets[0].compact && !back.columns[0].widgets[1].compact && back.columns[0].widgets[2].compact);
 
-    // a type without a compact card never writes the key, and warns when it reads one
+    // the other five write "compact": false when off, and read it back
+    for (const W t : {W::Frame, W::Cpu, W::Power, W::Network, W::General}) {
+        Layout off;
+        off.columns.resize(1);
+        off.columns[0].widgets = {inst(t, false)};
+        const std::string offText = layoutToJson(off, 0);
+        CHECK(offText.find("\"compact\":false") != std::string::npos);
+        Layout offBack;
+        warnings.clear();
+        CHECK(parseLayoutText(offText, offBack, warnings, error) && warnings.empty() && offBack.sameWidgets(off));
+        CHECK(!offBack.columns[0].widgets[0].compact);
+        CHECK(layoutToJson(offBack, 0) == offText);
+        // a missing key = compact
+        Layout missing;
+        CHECK(parseLayoutText(std::string(R"({"columns":[[{"type":")") + (t == W::Frame ? "frame" : t == W::Cpu ? "cpu" : t == W::Power ? "power" : t == W::Network ? "network" : "general") + R"("}]]})",
+                              missing, warnings, error));
+        CHECK(missing.columns[0].widgets[0].compact);
+    }
+    // Battery / Temp: a missing key = not compact, "compact": true = compact
+    CHECK(parseLayoutText(R"({"columns":[[{"type":"battery"},{"type":"temp","compact":true}]]})", back, warnings, error));
+    CHECK(!back.columns[0].widgets[0].compact && back.columns[0].widgets[1].compact);
+
+    // a type without a compact switch never writes the key, and warns when it reads one
     Layout noCompact;
     noCompact.columns.resize(1);
-    noCompact.columns[0].widgets = {inst(W::Frame, true)};
+    noCompact.columns[0].widgets = {inst(W::GpuRam, true), inst(W::GpuRam, false)};
     CHECK(layoutToJson(noCompact, 0).find("compact") == std::string::npos);
     Layout wrong;
     warnings.clear();
-    CHECK(parseLayoutText(R"({"columns":[[{"type":"cpu","compact":true},{"type":"general","compact":true}]]})",
+    CHECK(parseLayoutText(R"({"columns":[[{"type":"gpu_ram","compact":true},{"type":"cpu_items","compact":false}]]})",
                           wrong, warnings, error));
     CHECK(warnings.size() == 2);
     CHECK(wrong.columns[0].widgets.size() == 2);
-    for (const WidgetInstance& w : wrong.columns[0].widgets) CHECK(!w.compact);
 
-    // non-bool value: warns, stays false
+    // non-bool value: warns, keeps what a missing key means
     Layout bad;
     warnings.clear();
-    CHECK(parseLayoutText(R"({"columns":[[{"type":"temp","compact":"yes"}]]})", bad, warnings, error));
-    CHECK(warnings.size() == 1);
-    CHECK(!bad.columns[0].widgets[0].compact);
+    CHECK(parseLayoutText(R"({"columns":[[{"type":"temp","compact":"yes"},{"type":"frame","compact":"no"}]]})", bad,
+                          warnings, error));
+    CHECK(warnings.size() == 2);
+    CHECK(!bad.columns[0].widgets[0].compact && bad.columns[0].widgets[1].compact);
+
+    // "details" is gone: an unknown key
+    warnings.clear();
+    CHECK(parseLayoutText(R"({"columns":[[{"type":"network","details":true}]]})", bad, warnings, error));
+    CHECK(warnings.size() == 1 && warnings[0].find("unknown key details") != std::string::npos);
+    CHECK(layoutToJson(bad, 0).find("details") == std::string::npos);
 
     // operator== sees the field
-    WidgetInstance a = inst(W::Battery), b = inst(W::Battery);
+    WidgetInstance a = inst(W::Battery, false), b = inst(W::Battery, false);
     CHECK(a == b);
     b.compact = true;
     CHECK(a != b);
@@ -261,7 +296,39 @@ void testCompact() {
 
 }  // namespace
 
+// The process lists' settings: written only when not the default, read back
+void testReadoutSettings() {
+    Layout out;
+    std::vector<std::string> warnings;
+    std::string error;
+    const auto parse = [&](const char* json) {
+        warnings.clear();
+        return parseLayoutText(json, out, warnings, error);
+    };
+    const auto first = [&]() -> const WidgetInstance& { return out.columns[0].widgets[0]; };
+
+    // the process lists: defaults, round trip, clamping
+    CHECK(parse(R"({"columns":[[{"type":"cpu_items"},{"type":"ram_items"}]]})") && warnings.empty());
+    CHECK(first().maxItems == 15 && !first().sumSameName && !first().hideSystem);
+    CHECK(out.columns[0].widgets[1].type == W::RamItems);
+    CHECK(layoutToJson(out).find("\"max_items\":15") != std::string::npos);
+    CHECK(parse(R"({"columns":[[{"type":"cpu_items","max_items":7,"sum_same_name":true,"hide_system":true}]]})") &&
+          warnings.empty());
+    CHECK(first().maxItems == 7 && first().sumSameName && first().hideSystem);
+    Layout back;
+    CHECK(parseLayoutText(layoutToJson(out), back, warnings, error) && back.sameWidgets(out) && warnings.empty());
+    CHECK(parse(R"({"columns":[[{"type":"cpu_items","max_items":99}]]})") && warnings.size() == 1 && first().maxItems == 50);
+    CHECK(parse(R"({"columns":[[{"type":"ram_items","max_items":0}]]})") && warnings.size() == 1 && first().maxItems == 1);
+    CHECK(parse(R"({"columns":[[{"type":"ram_items","max_items":-4}]]})") && warnings.size() == 1 && first().maxItems == 1);
+    CHECK(parse(R"({"columns":[[{"type":"ram_items","max_items":"ten"}]]})") && warnings.size() == 1 && first().maxItems == 15);
+    CHECK(parse(R"({"columns":[[{"type":"ram_items","sum_same_name":1}]]})") && warnings.size() == 1 && !first().sumSameName);
+    // the list keys mean nothing elsewhere
+    CHECK(parse(R"({"columns":[[{"type":"frame","max_items":3}]]})") && warnings.size() == 1);
+    CHECK(isProcessList(W::CpuItems) && isProcessList(W::RamItems) && !isProcessList(W::Cpu));
+}
+
 int main() {
+    testReadoutSettings();
     testDefaultLayout();
     testRoundTrip();
     testBadInput();

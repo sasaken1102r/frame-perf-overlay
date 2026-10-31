@@ -119,12 +119,22 @@ void LayoutEditor::relayout() {
     const double sy = chipY + chipRows() * (kChipH + kChipGap) + 4;
     const double removeW = 130;
     settings_.push_back({Setting::Remove, {sx + sw - removeW, sy, removeW, kRowH}});
-    const double rowA = sy + kRowH + kRowGap;
     const double controlW = 270;
     const double controlX = sx + sw - controlW;
-    if (frame_perf_overlay::hasCompactView(w->type)) {
-        settings_.push_back({Setting::CompactOn, {controlX, rowA, controlW / 2, kRowH}});
-        settings_.push_back({Setting::CompactOff, {controlX + controlW / 2, rowA, controlW / 2, kRowH}});
+    double row = sy + kRowH + kRowGap;  // the next settings row
+    const auto pair = [&](Setting a, Setting b) {
+        settings_.push_back({a, {controlX, row, controlW / 2, kRowH}});
+        settings_.push_back({b, {controlX + controlW / 2, row, controlW / 2, kRowH}});
+        row += kRowH + kRowGap;
+    };
+    if (frame_perf_overlay::hasCompactView(w->type)) pair(Setting::CompactOn, Setting::CompactOff);
+    if (frame_perf_overlay::isProcessList(w->type)) {
+        // − value +: the value sits between the two buttons
+        settings_.push_back({Setting::ItemsFewer, {controlX, row, kRowH * 1.5, kRowH}});
+        settings_.push_back({Setting::ItemsMore, {controlX + controlW - kRowH * 1.5, row, kRowH * 1.5, kRowH}});
+        row += kRowH + kRowGap;
+        pair(Setting::SumOn, Setting::SumOff);
+        pair(Setting::HideOn, Setting::HideOff);
     }
 }
 
@@ -246,6 +256,12 @@ void LayoutEditor::applySetting(Setting setting) {
     switch (setting) {
         case Setting::CompactOn: e.compact = true; break;
         case Setting::CompactOff: e.compact = false; break;
+        case Setting::ItemsFewer: e.maxItems = std::max<uint32_t>(1, e.maxItems - 1); break;
+        case Setting::ItemsMore: e.maxItems = std::min(frame_perf_overlay::kMaxListItems, e.maxItems + 1); break;
+        case Setting::SumOn: e.sumSameName = true; break;
+        case Setting::SumOff: e.sumSameName = false; break;
+        case Setting::HideOn: e.hideSystem = true; break;
+        case Setting::HideOff: e.hideSystem = false; break;
         case Setting::Remove: break;
     }
     if (e != *w) queueCommit(edited, selected_);
@@ -601,11 +617,34 @@ void LayoutEditor::drawPalette(const Pen& pen, const UiText& text) const {
     pen.text(sx, centerBaseline(sy, kRowH, 22), title, fitSize(pen, title, 22, 14, card.w - 2 * kCardPad - 150, true), kText,
              true);
     button(Setting::Remove, text.removeWidget, false);
-    const double rowA = sy + kRowH + kRowGap;
+    double row = sy + kRowH + kRowGap;
+    const auto label = [&](const char* s) {
+        pen.text(sx, centerBaseline(row, kRowH, 20), s, fitSize(pen, s, 20, 13, 190, false), kTextMuted);
+    };
+    const auto pairRow = [&](const char* name, Setting a, Setting b, bool aSelected) {
+        label(name);
+        pill(a, b, text.on, text.off, aSelected);
+        row += kRowH + kRowGap;
+    };
+    bool any = false;
     if (frame_perf_overlay::hasCompactView(w->type)) {
-        pen.text(sx, centerBaseline(rowA, kRowH, 20), text.rowCompact, 20, kTextMuted);
-        pill(Setting::CompactOn, Setting::CompactOff, text.on, text.off, w->compact);
-    } else {
-        pen.text(sx, centerBaseline(rowA, kRowH, 18), text.noSettings, 18, kTextMuted);
+        pairRow(text.rowCompact, Setting::CompactOn, Setting::CompactOff, w->compact);
+        any = true;
+    }
+    if (frame_perf_overlay::isProcessList(w->type)) {
+        label(text.rowItems);
+        button(Setting::ItemsFewer, "−", false);
+        button(Setting::ItemsMore, "+", false);
+        const double controlW = 270;
+        const double controlX = sx + (card.w - 2 * kCardPad) - controlW;
+        textCentered(pen, controlX + controlW / 2, centerBaseline(row, kRowH, 20), std::to_string(w->maxItems), 20, kText,
+                     true);
+        row += kRowH + kRowGap;
+        pairRow(text.rowSumSameName, Setting::SumOn, Setting::SumOff, w->sumSameName);
+        pairRow(text.rowHideSystem, Setting::HideOn, Setting::HideOff, w->hideSystem);
+        any = true;
+    }
+    if (!any) {
+        pen.text(sx, centerBaseline(row, kRowH, 18), text.noSettings, 18, kTextMuted);
     }
 }

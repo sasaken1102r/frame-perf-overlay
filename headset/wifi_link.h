@@ -24,6 +24,47 @@ struct WifiInfo {
     WifiInfo();
 };
 
+/** One interface (a Network widget set to Dongle or Home). NaN / 0 / empty where there's no value. */
+struct AdapterInfo {
+    bool present = false;    ///< the interface exists
+    bool connected = false;  ///< it has a peer (a station on the AP, or the access point we're on)
+    std::string ifName;
+    std::string ip;          ///< first IPv4 address, empty if none
+    double rxMbps;           ///< from /sys/class/net/<if>/statistics, NaN on the first read
+    double txMbps;
+    double txLinkMbps;
+    double rxLinkMbps;
+    double signalDbm;
+    int freqMhz = 0;   ///< control channel; 0 = unknown
+    int widthMhz = 0;  ///< 0 = unknown
+
+    AdapterInfo();
+};
+
+/** Both interfaces from one read. */
+struct WifiAdapters {
+    AdapterInfo dongle;  ///< nl80211 type AP
+    AdapterInfo home;    ///< nl80211 type station
+};
+
+/** @return the channel number for a frequency (2.4 / 5 / 6 / 60 GHz), 0 if unknown */
+int channelFromFreq(int freqMhz);
+
+/**
+ * @return the band for a frequency, as a frame_perf_overlay::WifiBand value (core/metric_registry.h): 0 unknown,
+ *         1 2.4 GHz, 2 5 GHz, 3 6 GHz, 4 60 GHz. A plain number so this file needs nothing from core/.
+ */
+unsigned bandFromFreq(int freqMhz);
+
+/**
+ * @param nl80211Width an enum nl80211_chan_width value
+ * @return the width in MHz, 0 if unknown
+ */
+int widthMhzFromNl80211(unsigned nl80211Width);
+
+/** @return the combined link: the dongle if it has a peer, else home Wi-Fi (what WifiLink::read returns) */
+WifiInfo combineAdapters(const WifiAdapters& adapters);
+
 /**
  * nl80211 のソケットを 1 本持ち続けて、インターフェースとステーションの情報を問い合わせる。書き込み（設定変更）はしない。
  */
@@ -40,6 +81,13 @@ public:
      * @return 読み取り結果
      */
     WifiInfo read(double now);
+
+    /**
+     * Reads both interfaces: each one's station (signal, link rates), byte counters, and from the last interface
+     * scan its channel, width and IPv4 address. read() is combineAdapters() of this.
+     * @param now monotonic seconds
+     */
+    WifiAdapters readAdapters(double now);
 
     /**
      * 流れている量の計算をやり直す（読み取りを止めていたあと、止めていた間の平均を出さないため）。次の read の量は NaN。
@@ -68,6 +116,9 @@ private:
     struct Interface {
         unsigned ifindex = 0;  ///< 0 なら無い
         std::string name;
+        int freqMhz = 0;   ///< only while the interface is on a channel
+        int widthMhz = 0;
+        std::string ip;    ///< first IPv4 address at the last scan
     };
 
     nl_sock* socket_ = nullptr;

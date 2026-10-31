@@ -43,6 +43,7 @@ const EditorRect kPaletteCard {1052, 124, 520, 468};
 WidgetInstance inst(W type) {
     WidgetInstance w;
     w.type = type;
+    w.compact = false;  // the layouts these tests build start with the Compact switch off (a palette add is on)
     return w;
 }
 
@@ -197,7 +198,7 @@ void testGeometry() {
         CHECK(a.y + a.h <= b.y);
     }
     // One chip per type, all inside the palette card
-    CHECK(rig.ed.chips().size() == 8);  // the eight widgets; the reserved numbers have no chip
+    CHECK(rig.ed.chips().size() == 10);  // the ten widgets; the reserved numbers have no chip
     for (const auto& c : rig.ed.chips()) {
         CHECK(c.second.x >= kPaletteCard.x && c.second.x + c.second.w <= kPaletteCard.x + kPaletteCard.w);
         CHECK(c.second.y >= kPaletteCard.y && c.second.y + c.second.h <= kPaletteCard.y + kPaletteCard.h);
@@ -414,7 +415,7 @@ void testTapSelects() {
     rig.ed.pointerUp(c.x + 6, c.y + 6);
     CHECK(rig.ed.selected() == WidgetRef({0, 1}));
     CHECK(rig.nothingQueued());
-    CHECK(rig.ed.settingButtons().size() == 1);  // Cpu: just Remove
+    CHECK(rig.ed.settingButtons().size() == 3);  // Cpu: Remove and the Compact pair
     // Another card: the selection moves
     rig.tap(rig.centre({1, 0}));
     CHECK(rig.ed.selected() == WidgetRef({1, 0}));
@@ -616,10 +617,11 @@ void testChipAddsOnce() {
 void testUnofferedChips() {
     // Only the widgets this version has get a chip; None and the reserved numbers don't
     CHECK(!frame_perf_overlay::isOfferedInPalette(W::None));
-    for (const int reserved : {7, 8, 10}) CHECK(!frame_perf_overlay::isOfferedInPalette(static_cast<W>(reserved)));
+    for (const int reserved : {10, 12, 13}) CHECK(!frame_perf_overlay::isOfferedInPalette(static_cast<W>(reserved)));
     Rig rig(baseLayout(2));
     for (const auto& chip : rig.ed.chips()) CHECK(frame_perf_overlay::isOfferedInPalette(chip.first));
-    for (const W type : {W::Frame, W::Cpu, W::GpuRam, W::Power, W::Battery, W::Temp, W::Network, W::General}) {
+    for (const W type : {W::Frame, W::Cpu, W::GpuRam, W::Power, W::Battery, W::Temp, W::CpuItems, W::RamItems, W::Network,
+                         W::General}) {
         bool found = false;
         for (const auto& chip : rig.ed.chips()) found = found || chip.first == type;
         CHECK(found);
@@ -702,14 +704,20 @@ bool pressSetting(Rig& rig, Setting s, WidgetRef ref, WidgetInstance& out) {
 }
 
 void testSettingsButtons() {
-    // Which buttons show for which widget: Remove always, Compact for Battery and Temp only
-    for (const W type : {W::Frame, W::Cpu, W::GpuRam, W::Power, W::Battery, W::Temp, W::Network, W::General}) {
+    // Which buttons show for which widget: Remove always, Compact where the card has extra rows, items / sum / hide
+    // for the process lists
+    for (const W type : {W::Frame, W::Cpu, W::GpuRam, W::Power, W::Battery, W::Temp, W::CpuItems, W::RamItems, W::Network,
+                         W::General}) {
         Rig rig(make({{type}}));
         rig.tap(rig.centre({0, 0}));
         const bool compact = frame_perf_overlay::hasCompactView(type);
+        const bool list = frame_perf_overlay::isProcessList(type);
         CHECK(rig.hasSetting(Setting::Remove));
         CHECK(rig.hasSetting(Setting::CompactOn) == compact && rig.hasSetting(Setting::CompactOff) == compact);
-        CHECK(rig.ed.settingButtons().size() == (compact ? 3u : 1u));
+        CHECK(rig.hasSetting(Setting::ItemsMore) == list && rig.hasSetting(Setting::SumOn) == list &&
+              rig.hasSetting(Setting::HideOff) == list);
+        const size_t expected = 1 + (compact ? 2 : 0) + (list ? 6 : 0);
+        CHECK(rig.ed.settingButtons().size() == expected);
         // They all sit inside the palette card and don't overlap the chips
         for (const auto& b : rig.ed.settingButtons()) {
             CHECK(b.second.x >= kPaletteCard.x && b.second.x + b.second.w <= kPaletteCard.x + kPaletteCard.w);
@@ -1199,9 +1207,53 @@ void testChipLabelSizes() {
     cairo_surface_destroy(surface);
 }
 
+// A card added from the palette starts compact, whatever the type, and Battery / Temp then write "compact": true
+void testPaletteAddIsCompact() {
+    for (const W type : {W::Frame, W::Power, W::Battery, W::Temp, W::General}) {
+        Layout l = make({{W::Cpu}});
+        Rig rig(l);
+        rig.tap(rig.chip(type));
+        uint32_t base = 0;
+        Layout edited;
+        CHECK(rig.take(base, edited));
+        CHECK(frame_perf_overlay::countType(edited, type) == 1);
+        for (const auto& column : edited.columns) {
+            for (const WidgetInstance& w : column.widgets) {
+                if (w.type == type) {
+                    CHECK(w.compact);
+                    const std::string json = frame_perf_overlay::layoutToJson(edited, 0);
+                    CHECK((json.find("\"compact\":true") != std::string::npos) == (type == W::Battery || type == W::Temp));
+                }
+            }
+        }
+    }
+}
+
+// The Compact switch is on every card with extra rows; the list settings change only their own field
+void testCompactSwitch() {
+    WidgetInstance out;
+    for (const W type : {W::Frame, W::Cpu, W::Power, W::Battery, W::Temp, W::Network, W::General}) {
+        Layout l = make({{type}});
+        l.columns[0].widgets[0].compact = false;
+        Rig rig(l);
+        rig.tap(rig.centre({0, 0}));
+        CHECK(!pressSetting(rig, Setting::CompactOff, {0, 0}, out));  // already off: nothing queued
+        CHECK(pressSetting(rig, Setting::CompactOn, {0, 0}, out) && out.compact);
+    }
+    {
+        Rig rig(make({{W::CpuItems}}));
+        rig.tap(rig.centre({0, 0}));
+        CHECK(!pressSetting(rig, Setting::SumOff, {0, 0}, out));
+        CHECK(pressSetting(rig, Setting::ItemsMore, {0, 0}, out) && out.maxItems == frame_perf_overlay::kDefaultListItems + 1);
+        CHECK(pressSetting(rig, Setting::HideOn, {0, 0}, out) && out.hideSystem && !out.sumSameName);
+    }
+}
+
 }  // namespace
 
 int main() {
+    testCompactSwitch();
+    testPaletteAddIsCompact();
     testSyncReportsChange();
     testShrinkClampsScroll();
     testGeometry();

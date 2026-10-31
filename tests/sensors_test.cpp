@@ -90,6 +90,54 @@ void usageAndTopology() {
     near(sample.cpuMaxCorePct, 25);
 }
 
+// 1 行 = "cpuN busy 0 0 idle ..."（busy は user、idle は idle）
+std::string cpuLine(const char* name, unsigned busy, unsigned idle) {
+    return std::string(name) + " " + std::to_string(busy) + " 0 0 " + std::to_string(idle) + " 0 0 0 0\n";
+}
+
+// オフラインのコアは行ごと消える: 並びが詰まらず、そのコアの欄だけ NaN になる
+void offlineCoreKeepsItsSlot() {
+    StatFile stat;
+    Sensors sensors;
+    SensorsTestAccess::setStat(sensors, stat.fd);
+    stat.write(cpuLine("cpu", 100, 100) + cpuLine("cpu0", 0, 0) + cpuLine("cpu1", 0, 0) + cpuLine("cpu2", 0, 0) +
+               cpuLine("cpu3", 0, 0));
+    auto sample = SensorsTestAccess::cpu(sensors);
+    check(std::isnan(sample.cpuUsagePct) && sample.corePct.empty(), "first read needs a baseline");
+
+    // cpu2 offline: cpu0 10%, cpu1 50%, cpu3 80%
+    stat.write(cpuLine("cpu", 150, 150) + cpuLine("cpu0", 10, 90) + cpuLine("cpu1", 50, 50) + cpuLine("cpu3", 80, 20));
+    sample = SensorsTestAccess::cpu(sensors);
+    near(sample.cpuUsagePct, 50);
+    check(sample.corePct.size() == 4, "core slots must not shift");
+    near(sample.corePct[0], 10);
+    near(sample.corePct[1], 50);
+    check(std::isnan(sample.corePct[2]), "offline core must be NaN");
+    near(sample.corePct[3], 80);
+    near(sample.cpuMaxCorePct, 80);
+
+    // cpu2 back: no baseline for it on this read, the others are unaffected
+    stat.write(cpuLine("cpu", 170, 230) + cpuLine("cpu0", 30, 170) + cpuLine("cpu1", 60, 140) +
+               cpuLine("cpu2", 5, 5) + cpuLine("cpu3", 110, 90));
+    sample = SensorsTestAccess::cpu(sensors);
+    check(sample.corePct.size() == 4, "core slots must not shift");
+    near(sample.corePct[0], 20);
+    near(sample.corePct[1], 10);
+    check(std::isnan(sample.corePct[2]), "a core back online has no baseline yet");
+    near(sample.corePct[3], 30);
+    near(sample.cpuMaxCorePct, 30);  // the NaN is skipped
+
+    // next read: cpu2 has a real value again
+    stat.write(cpuLine("cpu", 180, 320) + cpuLine("cpu0", 37, 263) + cpuLine("cpu1", 75, 225) +
+               cpuLine("cpu2", 45, 65) + cpuLine("cpu3", 135, 165));
+    sample = SensorsTestAccess::cpu(sensors);
+    near(sample.corePct[0], 7);
+    near(sample.corePct[1], 15);
+    near(sample.corePct[2], 40);
+    near(sample.corePct[3], 25);
+    near(sample.cpuMaxCorePct, 40);
+}
+
 void repeatedSamples() {
     StatFile stat;
     Sensors sensors;
@@ -165,6 +213,7 @@ void powerChannels() {
 
 int main() {
     try {
+        offlineCoreKeepsItsSlot();
         usageAndTopology();
         repeatedSamples();
         description();

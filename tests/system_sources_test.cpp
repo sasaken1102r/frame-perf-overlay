@@ -557,6 +557,194 @@ void testHiddenPausesReads() {
     removeTree(root);
 }
 
+// ---------------------------------------------------------------------------------------------
+// The readouts (PR 2): per-core load, clusters, rails, extra temps, battery details, uptime
+
+void checkI32(const MetricStore& st, uint16_t id, int32_t expected, int line) {
+    const MetricValue* v = st.get(id);
+    if (v == nullptr || !v->ok) {
+        fail(line, id, "expected a value, got N/A");
+    } else if (v->i32 != expected) {
+        std::printf("FAIL line %d: metric %u: expected %d, got %d\n", line, static_cast<unsigned>(id), expected, v->i32);
+        ++failures;
+    }
+}
+
+void checkText(const MetricStore& st, uint16_t id, const char* expected, int line) {
+    const MetricValue* v = st.get(id);
+    if (v == nullptr || !v->ok) {
+        fail(line, id, "expected a value, got N/A");
+    } else if (v->text != expected) {
+        std::printf("FAIL line %d: metric %u: expected \"%s\", got \"%s\"\n", line, static_cast<unsigned>(id), expected,
+                    v->text.c_str());
+        ++failures;
+    }
+}
+
+#define I32_IS(st, id, expected) checkI32(st, id, expected, __LINE__)
+#define TEXT_IS(st, id, expected) checkText(st, id, expected, __LINE__)
+
+/** The extra files the readouts read, on top of buildTree(). */
+void addReadoutFiles(const std::string& root, bool plugged) {
+    // the chips' own volts (mV), matched to the power channels by label
+    put(root, "sys/class/hwmon/hwmon0/in0_label", "apc0");
+    put(root, "sys/class/hwmon/hwmon0/in0_input", "862");
+    put(root, "sys/class/hwmon/hwmon1/in0_label", "gfx");
+    put(root, "sys/class/hwmon/hwmon1/in0_input", "5");
+    put(root, "sys/class/hwmon/hwmon2/in0_label", "vph");
+    put(root, "sys/class/hwmon/hwmon2/in0_input", "3804");
+    // NPU (two zones: the max counts), camera, video
+    const struct {
+        const char* type;
+        long milli;
+    } zones[] = {{"nsph0-thermal", 50000}, {"nsph1-thermal", 52500}, {"camera-0-thermal", 44000}, {"video-thermal", 41000}};
+    int zone = 20;
+    for (const auto& z : zones) {
+        const std::string base = "sys/class/thermal/thermal_zone" + std::to_string(zone++);
+        put(root, base + "/type", z.type);
+        put(root, base + "/temp", std::to_string(z.milli));
+    }
+    // clusters: policy0 capped to 1.5 GHz under a Playtime-style limit, the rest at their hardware max
+    const struct {
+        const char* policy;
+        const char* max;
+        const char* hw;
+    } caps[] = {{"policy0", "1500000", "2265600"}, {"policy2", "3148800", "3148800"},
+                {"policy5", "2841600", "2841600"}, {"policy7", "2995200", "2995200"}};
+    for (const auto& c : caps) {
+        put(root, std::string("sys/devices/system/cpu/cpufreq/") + c.policy + "/scaling_max_freq", c.max);
+        put(root, std::string("sys/devices/system/cpu/cpufreq/") + c.policy + "/cpuinfo_max_freq", c.hw);
+    }
+    const std::string iio = "sys/bus/iio/devices/iio:device0/";
+    put(root, iio + "in_temp_pcba_at_wifi_input", "41000");
+    put(root, iio + "in_temp_pcba_at_flash_input", "39000");
+    put(root, iio + "in_temp_pcba_at_nrf_input", "38000");
+    put(root, iio + "in_temp_pcba_at_40pin_connector_input", "37000");
+    put(root, iio + "in_voltage_pm8550b_usb_sns_v_div_16_input", "8700000");  // uV
+    put(root, iio + "in_current_pm8550b_iin_fb_input", "1200000");            // uA
+    // battery: 2000 of 4000 mAh, 4500 design
+    const std::string bat = "sys/class/power_supply/max1720x_bat_7-36/";
+    put(root, bat + "current_avg", plugged ? "1000000" : "-1500000");
+    put(root, bat + "charge_now", "2000000");
+    put(root, bat + "charge_full", "4000000");
+    put(root, bat + "charge_full_design", "4500000");
+    put(root, bat + "health", "Good");
+    put(root, bat + "cycle_count", "123");
+    const std::string chg = "sys/class/power_supply/pm8550b-charger/";
+    put(root, chg + "status_detailed", plugged ? "CC: 1\nCV: 0\nICL: 0\nJEITA: 0\nBoost: 0" : "CC: 0\nCV: 0");
+    put(root, chg + "charging_enable", "1");
+    put(root, chg + "charging_pause", "0");
+    put(root, chg + "constant_charge_current", "3000000");
+    put(root, chg + "constant_charge_current_max", "5000000");
+    const std::string src = "sys/class/power_supply/tcpm-source-psy-usbpd0/";
+    put(root, src + "type", "USB");
+    put(root, src + "online", plugged ? "1" : "0");
+    put(root, src + "usb_type", "C [PD] PD_PPS");
+    put(root, src + "voltage_now", "9000000");
+    put(root, src + "current_max", "3000000");
+    put(root, "proc/uptime", "8914.95 62459.80");
+    put(root, "proc/self/statm", "617 292 271 7 0 146 0");
+}
+
+void testReadouts() {
+    const std::string root = makeTempRoot();
+    buildTree(root, TreeOptions());
+    addReadoutFiles(root, false);
+    {
+        Rig rig(root);
+        rig.start(kAllSystemWidgets);
+        const MetricStore& st = rig.store;
+        CHECK(rig.sched.runDue(10.0) > 0);
+
+        // per-core load: the first read is a baseline (every slot N/A), then cpu0 50 %, cpu1 0 %, and the six
+        // slots past the last core are SensorMissing
+        for (uint16_t i = 0; i < metric::kCpuCoreSlots; ++i) NA_IS(st, metric::kCpuCore0Pct + i, Reason::NotSampledYet);
+        put(root, "proc/stat", kStatB);
+        CHECK(rig.sched.runDue(10.5) > 0);
+        F32_IS(st, metric::kCpuCore0Pct, 50.0);
+        F32_IS(st, metric::kCpuCore0Pct + 1, 0.0);
+        for (uint16_t i = 2; i < metric::kCpuCoreSlots; ++i) NA_IS(st, metric::kCpuCore0Pct + i, Reason::SensorMissing);
+
+        // clusters: current, cap and hardware max; policy0 is capped (1500 < 2265.6)
+        F32_IS(st, metric::kCpuCluster0Mhz, 2265.6);
+        F32_IS(st, metric::kCpuCluster0MaxMhz, 1500.0);
+        F32_IS(st, metric::kCpuCluster0HwMaxMhz, 2265.6);
+        CHECK(st.f32Or(metric::kCpuCluster0MaxMhz, 0) < st.f32Or(metric::kCpuCluster0HwMaxMhz, 0));
+        F32_IS(st, metric::kCpuCluster0Mhz + 1, 3148.8);
+        F32_IS(st, metric::kCpuCluster0MaxMhz + 1, 3148.8);
+        F32_IS(st, metric::kCpuCluster0HwMaxMhz + 1, 3148.8);
+        F32_IS(st, metric::kCpuCluster0Mhz + 3, 2995.2);
+
+        // temps
+        F32_IS(st, metric::kTempNpuC, 52.5);
+        F32_IS(st, metric::kTempCameraC, 44.0);
+        F32_IS(st, metric::kTempVideoC, 41.0);
+        F32_IS(st, metric::kTempWifiC, 41.0);
+        F32_IS(st, metric::kTempFlashC, 39.0);
+        F32_IS(st, metric::kTempNrfC, 38.0);
+        F32_IS(st, metric::kTempConnectorC, 37.0);
+
+        // rails: watts and volts by label; gfx's volts are N/A InvalidReading; vph - rails is what's left
+        F32_NEAR(st, metric::kPowerUnmeasuredW, 9.188324 - 4.471471, 1e-5);
+        F32_IS(st, metric::kPowerVphV, 3.804);
+        F32_IS(st, metric::kPowerApc0W, 0.519995);
+        F32_IS(st, metric::kPowerApc0W + metric::kPowerRailVoltsOffset, 0.862);
+        F32_IS(st, metric::kPowerGfxW, 0.439515);
+        NA_IS(st, metric::kPowerGfxW + metric::kPowerRailVoltsOffset, Reason::InvalidReading);
+        NA_IS(st, metric::kPowerApc1W + metric::kPowerRailVoltsOffset, Reason::ReadFailed);  // the chip has no in1
+
+        // battery on battery: 2000 mAh at 1.5 A = 4800 s to empty, no time to full, nothing plugged
+        F32_IS(st, metric::kBatteryChargeNowMah, 2000.0);
+        F32_IS(st, metric::kBatteryChargeFullMah, 4000.0);
+        F32_IS(st, metric::kBatteryChargeDesignMah, 4500.0);
+        TEXT_IS(st, metric::kBatteryHealth, "Good");
+        I32_IS(st, metric::kBatteryCycles, 123);
+        I32_IS(st, metric::kBatteryTimeToEmptyS, 4800);
+        NA_IS(st, metric::kBatteryTimeToFullS, Reason::NotConnected);
+        TEXT_IS(st, metric::kBatteryChargerMode, "Unplugged");
+        ENUM_IS(st, metric::kBatteryPlugged, 0);
+        F32_IS(st, metric::kBatterySetCurrentA, 3.0);
+        F32_IS(st, metric::kBatterySetCurrentMaxA, 5.0);
+        NA_IS(st, metric::kBatteryPdOfferedV, Reason::NotConnected);
+        NA_IS(st, metric::kBatteryInputV, Reason::NotConnected);  // the ADC is not even read unplugged
+        NA_IS(st, metric::kBatterySagV, Reason::NotConnected);
+
+        // uptime (whole seconds) and the HUD's own RSS
+        I32_IS(st, metric::kUptimeS, 8914);
+        F32_NEAR(st, metric::kSelfRssMib, 292.0 * static_cast<double>(::sysconf(_SC_PAGESIZE)) / (1024.0 * 1024.0), 1e-3);
+    }
+    removeTree(root);
+}
+
+void testReadoutsPlugged() {
+    const std::string root = makeTempRoot();
+    TreeOptions o;
+    o.plugged = true;
+    buildTree(root, o);
+    addReadoutFiles(root, true);
+    {
+        Rig rig(root);
+        rig.start({WidgetType::Battery});
+        const MetricStore& st = rig.store;
+        CHECK(rig.sched.runDue(10.0) > 0);
+        // charging: (4000 - 2000) mAh at 1.0 A = 7200 s, nothing to empty
+        I32_IS(st, metric::kBatteryTimeToFullS, 7200);
+        NA_IS(st, metric::kBatteryTimeToEmptyS, Reason::InvalidReading);
+        TEXT_IS(st, metric::kBatteryChargerMode, "CC");
+        ENUM_IS(st, metric::kBatteryPlugged, 1);
+        // the USB-C contract (PD, 9 V x 3 A) against what arrives (8.7 V x 1.2 A): 0.3 V lost
+        TEXT_IS(st, metric::kBatteryUsbType, "PD");
+        F32_IS(st, metric::kBatteryPdOfferedV, 9.0);
+        F32_IS(st, metric::kBatteryPdOfferedA, 3.0);
+        F32_IS(st, metric::kBatteryPdOfferedW, 27.0);
+        F32_IS(st, metric::kBatteryInputV, 8.7);
+        F32_IS(st, metric::kBatteryInputA, 1.2);
+        F32_IS(st, metric::kBatteryInputW, 8.7 * 1.2);
+        F32_NEAR(st, metric::kBatterySagV, 0.3, 1e-4);
+    }
+    removeTree(root);
+}
+
 }  // namespace
 
 int main() {
@@ -567,6 +755,8 @@ int main() {
     testIntervals();
     testDemand();
     testHiddenPausesReads();
+    testReadouts();
+    testReadoutsPlugged();
     if (failures != 0) {
         std::printf("%d check(s) failed\n", failures);
         return 1;

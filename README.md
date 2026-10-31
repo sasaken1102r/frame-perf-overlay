@@ -12,7 +12,7 @@ Recorded inside the headset while playing Half-Life: Alyx (no sound). The panel 
 
 The panel follows your head and sits in the lower left of your view by default. It can also be worn on your left or right controller like a wristwatch, and it shows the time on its bottom line. Where it's attached, position, facing, size, opacity, clock and language (English / Japanese) can be changed from the SteamVR dashboard.
 
-The panel is a grid of widgets (Frame, Power, Temp, CPU, GPU & RAM, Network, Battery, General). The **Layout** page of the dashboard tab moves them between columns, adds and removes them, and turns some into a shorter **Compact** card; the **Profiles** page saves layouts and switches between them. A widget that isn't on the panel reads nothing, and nothing is read at all while nobody can see the panel (hidden, headset off your head) unless the dashboard tab is open.
+The panel is a grid of widgets (Frame, Power, Temp, CPU, GPU & RAM, Network, Battery, General, CPU items, RAM items). The **Layout** page of the dashboard tab moves them between columns, adds and removes them, and switches **Compact** off on a card to show more of it; the **Profiles** page saves layouts and switches between them. A widget that isn't on the panel reads nothing, and nothing is read at all while nobody can see the panel (hidden, headset off your head) unless the dashboard tab is open.
 
 ![The Layout page of the settings tab in the SteamVR dashboard](docs/images/settings-en.png)
 
@@ -20,7 +20,7 @@ These images were written out by the app itself (`--dump-png` / `--dump-settings
 
 ## What it shows
 
-The default layout puts what the panel has always shown in two columns (Frame, Power, Temp and CPU on the left; GPU & RAM, Network, Battery and General on the right), with Temp and Battery as Compact cards, so the panel is wide and low like before. Turn Compact off on Temp to see DDR and the battery, display, exhaust and heat sink temperatures. Each widget is a card; the ones with a graph show the last 30 s.
+The default layout puts what the panel has always shown in two columns (Frame, Power, Temp and CPU on the left; GPU & RAM, Network, Battery and General on the right), with Temp and Battery as Compact cards, so the panel is wide and low like before. Turn Compact off on a card to see more: on Temp, for example, DDR and every other temperature. Each widget is a card; the ones with a graph show the last 30 s.
 
 | Widget | Main number | Details | Graph |
 |---|---|---|---|
@@ -33,7 +33,26 @@ The default layout puts what the panel has always shown in two columns (Frame, P
 | Battery | Headset battery (%) and its state (a bolt while charging) | Power into / out of the battery (W); the full card adds the voltage × current line | |
 | General | Left and right controller batteries (a bolt while charging) | The time on the headset's clock (24-hour by default; 12-hour or off in the settings) | |
 
-Battery and Temp have a **Compact** card: Battery keeps the % and the W line, Temp keeps its graph and drops DDR and the other temperatures.
+Every widget but GPU & RAM and the process lists has a **Compact** switch. Compact on is the card above; a widget added from the palette starts compact, and so do Frame, CPU, Power, Network and General in a layout from before the switch, so they look exactly as they did. Battery and Temp keep their meaning from before: compact is the short card (Battery: the % and the W line; Temp: CPU / GPU / fan and the graph), and with Compact off they show everything below. With Compact off, a card grows and adds:
+
+| Widget | Compact off adds |
+|---|---|
+| Frame | Two graphs under the frame rate: CPU and GPU time per frame (the worst frame of each read), with the average and the worst in ms, and the frame budget as a dotted line |
+| CPU | A bar per core, then each cluster's clock and its current maximum (**capped from** the hardware maximum while Playtime or a thermal cap lowers it) |
+| Power | The vph voltage, then each rail under it (CPU apc0-2, GPU, NPU, s1c / s3c / s6c, bob) with W, V and a bar for its share of vph, and what no rail measures (**Unmeasured**) |
+| Battery | The voltage × current line, charge in mAh (now / full / design), time to full or to empty while charging or discharging, health and cycles, the charger's mode (CC, CV, Full, Paused, ...), the set charge current, and with a cable in: the USB type, what the charger offers over USB-PD, what arrives, and the voltage lost on the way (**Sag**, yellow from 10 % of the offered voltage) |
+| Temp | DDR, then eleven spots: the battery, near the display / exhaust / heat sink, the NPU, cameras, video, and near the Wi-Fi chip, the flash, the nRF radio and the 40-pin connector |
+| Network | Both links in one card instead of the one in use: **Dongle** (the Steam Link dongle, `wlanap`) and then **Wi-Fi** (`wlan0`), each with its signal, ↓/↑ rates, link rate, band, channel, channel width and the headset's IP address on that link, or **Not connected** |
+| General | Uptime (since the headset was switched on, sleep included), the app in front (**App**), and what this overlay costs (**HUD cost**: its CPU % of one core, its memory, and an estimate of its power) |
+
+Two more widgets list processes:
+
+| Widget | Shows |
+|---|---|
+| CPU items | The busiest processes, as % of one core (four busy cores = 400 %), every 2 seconds |
+| RAM items | The processes using the most memory (resident, MiB) |
+
+Their settings: how many rows (1 to 50, 15 by default), **One row per name** (adds up processes with the same name, `×N` after the name), and **Hide system**, which leaves out SteamOS, Steam and SteamVR processes as listed in `hide_rules.json` (see [Settings file](#settings-file)).
 
 Numbers over a threshold turn yellow, and red past a second threshold. The thresholds can be changed in the settings file.
 
@@ -124,7 +143,7 @@ Options:
   | Quit app | Click twice within 3 seconds to quit |
 
   Changes apply immediately and are saved to the settings file.
-- **Layout page**: the left card shows the panel's columns, one card per widget. Drag a card to another place or column (drop it on the dashed **New column** lane for a new one; up to 8 columns of 16 widgets), or onto the palette on the right to remove it. Tap a widget in the palette to add it to the shortest column, or drag it where you want it. Tap a card to select it: its settings show under the palette (**Compact** for Battery and Temp, and **Remove**). Every change is saved at once and shows on the panel. The thumbstick scrolls the columns when they don't fit.
+- **Layout page**: the left card shows the panel's columns, one card per widget. Drag a card to another place or column (drop it on the dashed **New column** lane for a new one; up to 8 columns of 16 widgets), or onto the palette on the right to remove it. Tap a widget in the palette to add it to the shortest column, or drag it where you want it. Tap a card to select it: its settings show under the palette (**Compact** for every widget but GPU & RAM and the process lists, the rows, **One row per name** and **Hide system** for CPU items and RAM items, and **Remove**). Every change is saved at once and shows on the panel. The thumbstick scrolls the columns when they don't fit.
 - **Profiles page**: a profile is a saved layout (columns, widgets and their settings; placement and app settings aren't part of it). **New profile** saves the layout you have now (up to 8), **Use** loads the selected one, **Save** writes the layout you have now into the active profile, **Rename** opens SteamVR's keyboard, **Delete** removes the selected one, and **Reset to default** puts the default layout back (your profiles stay). **Use** and **Reset to default** ask for a second tap when the layout's changes would be lost, and **Delete** always does. Profiles are files in `~/.config/frame-perf-overlay/profiles/`.
 - **On your hand**: the panel follows the controller (SteamVR's tracking of the controller, not hand tracking). If the controller or the headset loses tracking, the panel hides at once and fades back in when tracking returns. The **Perf** tab still works while the panel is hidden. The best position and facing depend on how you hold the controller, so adjust them with the headset on.
 - **Updates**: a bar in the title row, right of the title, always shows the running version, e.g. `Up to date (0.2.0)` (with the automatic check turned off, just the version until you check), with a **Check now** button that asks GitHub right away (it works even with the automatic check turned off). What the bar shows:
@@ -160,7 +179,7 @@ A file with every key at its default value is in [`contrib/config.example.json`]
 | `update_interval_ms` | `500` | Update interval (100 to 5000 ms) |
 | `graph_seconds` | `30` | Seconds shown in the graphs (5 to 300) |
 | `font` / `font_bold` | Noto Sans CJK Regular / Bold | Font files. If they can't be read, "Noto Sans CJK JP" is looked up with fontconfig |
-| `layout` | two columns: Frame, Power, Temp (compact), CPU / GPU & RAM, Network, Battery (compact), General | The widget grid, written by the **Layout** page: `{"version": N, "columns": [[{"type": "frame"}, ...], ...]}`. Widget types are `frame`, `cpu`, `gpu_ram`, `power`, `battery`, `temp`, `network` and `general`; `battery` and `temp` take `"compact": true`. A file without `layout` (or with a broken one) gets the default, and the next save writes it out |
+| `layout` | two columns: Frame, Power, Temp (compact), CPU / GPU & RAM, Network, Battery (compact), General | The widget grid, written by the **Layout** page: `{"version": N, "columns": [[{"type": "frame"}, ...], ...]}`. Widget types are `frame`, `cpu`, `gpu_ram`, `power`, `battery`, `temp`, `cpu_items`, `ram_items`, `network` and `general`; `frame`, `cpu`, `power`, `battery`, `temp`, `network` and `general` take `"compact"` (left out: on, except `battery` and `temp`, where it's off as before); `cpu_items` and `ram_items` take `"max_items"` (1-50), `"sum_same_name"` and `"hide_system"`. A file without `layout` (or with a broken one) gets the default, and the next save writes it out |
 | `active_profile` | `""` | The profile last used or saved on the **Profiles** page (`"profile-2"`), `""` for none |
 | `thresholds.fps_warn_ratio` / `fps_crit_ratio` | `0.95` / `0.75` | Yellow / red when the app's frame rate is **below** refresh rate × this ratio |
 | `thresholds.frame_warn_ratio` / `frame_crit_ratio` | `0.9` / `1.0` | Yellow / red when GPU or CPU time is at least the frame budget × this factor |
@@ -174,6 +193,18 @@ A file with every key at its default value is in [`contrib/config.example.json`]
 | `thresholds.controller_warn_pct` / `controller_crit_pct` | `20` / `10` | Controller battery (%), yellow / red at or **below** |
 
 To use a different file, start the program with `--config PATH`.
+
+`hide_rules.json`, next to the settings file, lists what **Hide system** leaves out of CPU items and RAM items. The app writes its built-in list there the first time (SteamOS services, Steam and SteamVR), and reads the file again whenever it changes; if it can't use an edited file, it keeps the last good list and says why in the log. `name` matches a process's name or its program file's name, `cgroup` matches its cgroup path (`/proc/<pid>/cgroup`); both take `*` and `?`, and a rule with both needs both. `note` is free text.
+
+```json
+{
+  "version": 1,
+  "hide": [
+    {"cgroup": "/system.slice/*", "note": "system services"},
+    {"name": "vrserver", "note": "SteamVR server"}
+  ]
+}
+```
 
 ## Autostart
 
@@ -228,7 +259,11 @@ Some values were checked against another source on a Steam Frame; others are est
 - **fps while streaming with Steam Link**: not yet checked whether frames dropped on the PC or on the network always show up as a lower fps.
 - **Wireless throughput**: counts all traffic on the direct wireless link, not only the stream. On **Wi-Fi** it is everything the headset sends and receives over Wi-Fi (downloads, other apps and so on), not only Steam Link.
 - **Wi-Fi signal**: on the direct link it is the average signal of the PC's acknowledgements (the headset's own signal reading is 0 there); on Wi-Fi it is the signal of the access point as the headset receives it (the same value the OS shows), so the two can differ by a few dB for the same distance.
-- **Display, exhaust and heat sink temperatures**: the names come from the sensor names; where exactly each sensor sits isn't documented.
+- **Display, exhaust and heat sink temperatures**: the names come from the sensor names; where exactly each sensor sits isn't documented. The same goes for the other spots (NPU, camera, video, Wi-Fi, flash, nRF, connector).
+- **Rail voltages and Unmeasured** (Power, Compact off): each rail's own voltage sense, as the sensor reports it. The GPU rail's reads a few mV at about 0.4 W, so it shows "—". Unmeasured is vph minus the rails, so it includes the losses of the converters; the chips sample at slightly different times, so it can be off by a little under a load change.
+- **Time to full / to empty** (Battery, Compact off): the gauge's mAh divided by the averaged current, assuming the current stays the same. The gauge's own estimate barely moved when the current changed four times, so it isn't used.
+- **HUD cost** (General, Compact off): the CPU % and memory are this overlay's own; the W is an estimate, its share of all busy CPU time times the CPU rails' power, so it is shown with "≈".
+- **CPU items**: % of one core over the last 2 seconds, from each process's CPU time. A process that starts or ends in between shows less than it used.
 - **Controller batteries**: shown as SteamVR reports them.
 
 ## Known issues
@@ -244,8 +279,9 @@ Some values were checked against another source on a Steam Frame; others are est
 ## Privacy
 
 - The app itself has no telemetry. The **only** outside network access is the update check: it asks `api.github.com` for the latest release (while `update_check` is on: at start and then at most once every 24 hours — an hour after a failed check — or right away when you press **Check now**), and, only after you confirm an install, downloads the release's tar.gz and `SHA256SUMS` from `github.com` / `*.githubusercontent.com` over HTTPS. Nothing else is sent; GitHub sees the usual anonymous HTTP request (your headset's IP, `curl`'s user agent). (For the Wi-Fi status shown in the panel it only asks the headset's own kernel — that never leaves the headset.)
-- For the Steam Link direct link, and for the Wi-Fi access point the headset is joined to, it reads only the signal strength, link rates and byte counters, from the headset's own Wi-Fi driver. It doesn't extract, show or log any MAC address (PC, access point or headset) or the network name (SSID) of your Wi-Fi.
-- Files it writes: its own settings file (a temporary `config.json.tmp` next to it, renamed into place); a small lock file in `/run/user/<uid>` (memory only; `/tmp` if that folder doesn't exist) holding the app's process ID; and, only when checking or installing updates, the update helper's own cache files under `~/.cache/frame-perf-overlay/` (the last check's answer, install progress/log, a lock folder while it runs, and a working folder `update/` for the downloaded tar.gz and its extracted files, which is emptied when the install ends; a copy of the helper script stays there — see [Updates](#updates)).
+- For the Steam Link direct link, and for the Wi-Fi access point the headset is joined to, it reads only the signal strength, link rates, channel and byte counters, from the headset's own Wi-Fi driver, and the headset's own IP address on each link (shown by Network with Compact off). It doesn't extract, show or log any MAC address (PC, access point or headset) or the network name (SSID) of your Wi-Fi.
+- CPU items and RAM items read each process's name, CPU time and memory from `/proc` on the headset, and General with Compact off asks SteamVR for the app in front. These are only shown on the panel; they aren't saved, logged or sent anywhere.
+- Files it writes: its own settings file (a temporary `config.json.tmp` next to it, renamed into place); `hide_rules.json` next to it, once, if it isn't there; a small lock file in `/run/user/<uid>` (memory only; `/tmp` if that folder doesn't exist) holding the app's process ID; and, only when checking or installing updates, the update helper's own cache files under `~/.cache/frame-perf-overlay/` (the last check's answer, install progress/log, a lock folder while it runs, and a working folder `update/` for the downloaded tar.gz and its extracted files, which is emptied when the install ends; a copy of the helper script stays there — see [Updates](#updates)).
 - When the panel is on a hand, it reads the position and orientation of that controller and of the headset from SteamVR to place and fade the panel. It uses them only in memory; they aren't saved, logged or sent anywhere.
 - Logs stay on the headset in the systemd journal.
 
@@ -316,3 +352,4 @@ MIT. See [LICENSE](LICENSE). `vendor/frame-updater/` is a copy of the author's o
 - Wrist attachment, the clock and the tilt fade were contributed by [TaiKeid](https://github.com/TaiKeid) in [#1](https://github.com/sasaken1102r/frame-perf-overlay/pull/1).
 - The smaller release build, the faster RGBA conversion and the extra tests were contributed by [cinnacappu](https://github.com/cinnacappu) in [#2](https://github.com/sasaken1102r/frame-perf-overlay/pull/2).
 - The widget layout, the layout editor and profiles were contributed by [finaea](https://github.com/finaea) in [#4](https://github.com/sasaken1102r/frame-perf-overlay/pull/4).
+- The Compact switch on every card, its extra rows, and the CPU items and RAM items widgets were contributed by [finaea](https://github.com/finaea).

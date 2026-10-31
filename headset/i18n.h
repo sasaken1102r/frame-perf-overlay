@@ -131,7 +131,7 @@ struct UiText {
     const char* layoutSaved;         ///< status after an applied edit
     const char* layoutStale;         ///< status after a rejected (stale) edit
     const char* layoutSaveFailed;    ///< status after a failed save
-    const char* rowCompact;          ///< Battery, Temp: the short card
+    const char* rowCompact;          ///< the short card (off adds the extra rows)
     // ---- The Profiles page ----
     const char* pageProfiles;        ///< page switch
     const char* cardProfiles;        ///< the list's title
@@ -150,6 +150,10 @@ struct UiText {
     const char* profileNotSaved;     ///< no active profile and the live layout isn't saved in any
     const char* profileHint;         ///< what a profile holds
     const char* profileKeyboard;     ///< the keyboard's description when renaming
+    // ---- The layout editor's settings for the process lists ----
+    const char* rowItems;            ///< CPU / RAM items: rows shown
+    const char* rowSumSameName;      ///< one row per process name
+    const char* rowHideSystem;       ///< leave out SteamOS / Steam / SteamVR (hide_rules.json)
 };
 
 /**

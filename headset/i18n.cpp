@@ -123,6 +123,10 @@ const UiText kJapanese = {
     "今のレイアウトはどのプロファイルにも保存されていません",
     "プロファイルに入るのはレイアウト（列・ウィジェットとその設定）だけ。位置やアプリの設定は入りません",
     "プロファイルの名前",
+    // The layout editor's widget settings (English until translated)
+    "Rows",            // TODO(ja)
+    "One row per name",  // TODO(ja)
+    "Hide system",     // TODO(ja)
 };
 
 const UiText kEnglish = {
@@ -169,6 +173,8 @@ const UiText kEnglish = {
     "The layout you have now isn't saved in a profile",
     "A profile is the layout only: columns, widgets and their settings. Placement and app settings aren't part of it",
     "Profile name",
+    // The layout editor's widget settings
+    "Rows", "One row per name", "Hide system",
 };
 
 }  // namespace

@@ -101,7 +101,10 @@ public:
     /** @return the settings buttons for the selected widget, by id (see Setting) */
     enum class Setting {
         Remove,
-        CompactOn, CompactOff,  // Battery, Temp
+        CompactOn, CompactOff,  // hasCompactView types (off adds the extra rows)
+        ItemsFewer, ItemsMore,  // CPU / RAM items: rows shown
+        SumOn, SumOff,          // CPU / RAM items: one row per name
+        HideOn, HideOff,        // CPU / RAM items: Hide system
     };
     const std::vector<std::pair<Setting, EditorRect>>& settingButtons() const { return settings_; }
 
