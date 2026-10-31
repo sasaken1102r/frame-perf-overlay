@@ -194,7 +194,7 @@ A file with every key at its default value is in [`contrib/config.example.json`]
 
 To use a different file, start the program with `--config PATH`.
 
-`hide_rules.json`, next to the settings file, lists what **Hide system** leaves out of CPU items and RAM items. The app writes its built-in list there the first time (SteamOS services, Steam and SteamVR), and reads the file again whenever it changes; if it can't use an edited file, it keeps the last good list and says why in the log. `name` matches a process's name or its program file's name, `cgroup` matches its cgroup path (`/proc/<pid>/cgroup`); both take `*` and `?`, and a rule with both needs both. `note` is free text.
+`hide_rules.json`, next to the settings file, lists what **Hide system** leaves out of CPU items and RAM items. The app writes its built-in list there the first time (SteamOS services, Steam and SteamVR), and reads the file again whenever it changes. Built-in rules added in a later version are added to the file once, at start; rules you deleted don't come back. If it can't use an edited file, it keeps the last good list, shows a line at the bottom of the card, and says why in the log. `name` matches a process's name or its program file's name, `cgroup` matches its cgroup path (`/proc/<pid>/cgroup`); both take `*` and `?`, and a rule with both needs both. `note` is free text.
 
 ```json
 {
@@ -352,4 +352,4 @@ MIT. See [LICENSE](LICENSE). `vendor/frame-updater/` is a copy of the author's o
 - Wrist attachment, the clock and the tilt fade were contributed by [TaiKeid](https://github.com/TaiKeid) in [#1](https://github.com/sasaken1102r/frame-perf-overlay/pull/1).
 - The smaller release build, the faster RGBA conversion and the extra tests were contributed by [cinnacappu](https://github.com/cinnacappu) in [#2](https://github.com/sasaken1102r/frame-perf-overlay/pull/2).
 - The widget layout, the layout editor and profiles were contributed by [finaea](https://github.com/finaea) in [#4](https://github.com/sasaken1102r/frame-perf-overlay/pull/4).
-- The Compact switch on every card, its extra rows, and the CPU items and RAM items widgets were contributed by [finaea](https://github.com/finaea).
+- The Compact switch on every card, its extra rows, and the CPU items and RAM items widgets were contributed by [finaea](https://github.com/finaea) in [#5](https://github.com/sasaken1102r/frame-perf-overlay/pull/5).

@@ -2,22 +2,23 @@
 
 ## 未リリース
 
-### Readouts (finaea's PR)
+### 小さく表示しないときの行・「CPU 上位」・「メモリ上位」（finaea さんの PR #5）
 
-- The **Compact** switch is on every card that has more to show (all but GPU & RAM). Frame, CPU, Power, Network and General start compact, which is exactly their 0.4.0 card, so an updated panel keeps its shape (the default layout is unchanged). With Compact off:
-  - Frame: CPU and GPU frame-time graphs (the worst frame per read, average and worst in ms, the budget as a dotted line)
-  - CPU: a bar per core (an offline core doesn't shift the other bars), and each cluster's clock and current maximum ("capped from" while it's below the hardware maximum)
-  - Power: the vph voltage, every rail with W, V and its share of vph, and what no rail measures
-  - Battery: the V × A line, mAh (now / full / design), time to full / empty, health and cycles, the charger's mode, the set current, and with a cable in the USB type, USB-PD offer, what arrives and the sag
-  - Temp: DDR and every spot: battery, display, exhaust, heat sink, NPU, camera, video, and near the Wi-Fi chip, flash, nRF radio and 40-pin connector
-  - Network: both links in one card (the dongle, then Wi-Fi), each with its signal, rates, link rate, band, channel, width and IP address, or Not connected
-  - General: uptime, the app in front and this overlay's own cost (CPU, memory, ≈ W)
-  - Battery and Temp keep 0.4.0's meaning of `compact`. **Visible change:** a Battery or Temp that was not compact in 0.4.0 now shows these extra rows too (Temp 154 → 198 px, Battery 142 → 222–322 px, depending on which rows show); compact ones and the default layout are unchanged
-- New widgets **CPU items** and **RAM items**: the busiest processes by CPU (% of one core) and by memory, every 2 seconds, with the number of rows (1-50), One row per name, and Hide system. A process shows by its comm name, or by its program's file name when the comm is a cut-off start of it ("at-spi-bus-launcher") or the other way round ("vrlink"). Hide system's list is `hide_rules.json` next to the settings file (written once with a built-in list, re-read when edited; built-in rules added in a later version are appended at start, and a file that doesn't load shows a line on the card while the last good rules stay in use)
-- New readings are read only while a widget that shows them is on the panel and someone is looking, like the rest: processes every 2 s, uptime every 1 s, this overlay's own cost every 2 s, the app in front every 5 s and at once when SteamVR changes app. The last three are read only while General has Compact off. After the panel shows again, the process lists and the HUD cost read again 0.25 s later
-- The layout file takes `"compact"` on the new types (`false` is written only when off; a missing key keeps the 0.4.0 card), and `"max_items"`, `"sum_same_name"` and `"hide_system"` on the process lists
-- New UI strings are in English in both languages for now (TODO(ja))
-- Tests: the new readers (fake `/sys` and `/proc`), the cards with Compact off, the process lists and hide rules, and that 0.4.0 layouts keep their size
+- 「小さく表示」のスイッチを、もっと出せるものがあるカード全部に付けた（「GPU・メモリ」以外）。「フレーム」「CPU」「電力」「通信」「その他」は小さく表示で始まり、それが 0.4.0 のカードとまったく同じなので、更新してもパネルの形は変わらない（既定のレイアウトも同じ）。小さく表示をオフにすると:
+  - 「フレーム」: CPU と GPU のフレーム時間のグラフ（読むごとの一番遅いフレーム、平均と最大の ms、間に合う時間を点線で）
+  - 「CPU」: コアごとのバー（オフラインのコアがあってもほかのバーはずれない）、クラスタごとのクロックと今の上限（ハードウェアの上限より低いときは「本来」の値も）
+  - 「電力」: vph の電圧、レールごとの W・V と vph に対する割合、どのレールでも測っていない分（「未計測」）
+  - 「電池」: V × A の行、容量（今 / 満充電 / 設計の mAh）、満充電まで / 空になるまで、電池の状態とサイクル、充電モード、設定電流、ケーブルが挿さっているときは USB の種類・PD 出力・実際の入力・電圧の落ち
+  - 「温度」: DDR と、電池・画面・排気・放熱・NPU・カメラ・映像・Wi-Fi チップの近く・ストレージ・nRF・40 ピンの端子
+  - 「通信」: 両方のつなぎ方を 1 枚に（直通、その下に Wi-Fi）。それぞれ電波の強さ、速度、リンク速度、帯域、チャンネル、幅、IP アドレス、または「未接続」
+  - 「その他」: 起動からの時間、前に出ているアプリ、このパネル自体の負荷（CPU、メモリ、≈ W）
+  - 「電池」と「温度」の `compact` の意味は 0.4.0 と同じ。**見た目が変わるところ:** 0.4.0 で小さく表示にしていなかった「電池」「温度」は、この行も出るので高くなる（「温度」154 → 198px、「電池」142 → 222〜322px。出る行によって変わる）。小さく表示のカードと既定のレイアウトは変わらない
+- ウィジェット「CPU 上位」と「メモリ上位」を足した: CPU（1 コアに対する %）とメモリを多く使っているプロセスを 2 秒おきに並べる。設定は「行数」（1〜50）、「同じ名前は 1 行に」、「システムを隠す」。プロセスは comm の名前で出す。comm が 15 文字で切れていてプログラムのファイル名の頭と同じとき（「at-spi-bus-launcher」）と、15 文字のスレッド名がファイル名で始まるとき（「vrlink」）だけ、ファイル名で出す。「システムを隠す」のリストは設定ファイルの隣の `hide_rules.json`（なければ内蔵のリストで 1 回だけ書く。書き換えたら読み直す。あとの版で足した内蔵のルールは起動時に追記する。読めないファイルのときはカードに 1 行出して、前に読めたルールを使い続ける）
+- 増えた値も、ほかと同じく、出しているウィジェットがパネルにあって誰かが見ている間だけ読む: プロセスは 2 秒おき、起動からの時間は 1 秒おき、このパネル自体の負荷は 2 秒おき、前に出ているアプリは 5 秒おきと SteamVR がアプリを切り替えたとき。あとの 3 つは「その他」の小さく表示がオフのときだけ読む。パネルが出直したら、プロセスの一覧とこのパネルの負荷は 0.25 秒後にもう一度読む
+- レイアウトのファイルに、新しく小さく表示を付けたカードの `"compact"`（オフのときだけ `false` を書く。キーが無ければ 0.4.0 のカード）と、プロセスの一覧の `"max_items"`・`"sum_same_name"`・`"hide_system"` を足した
+- 追加された画面の文言に日本語を足した
+- pipewire-pulse が「pipewire」と出ていたのを直した（プログラムのファイルが pipewire へのリンクなので、ファイル名のほうを選んでいた）
+- テストを足した: 新しい読み取り（作り物の `/sys` と `/proc` で）、小さく表示をオフにしたカード、プロセスの一覧と隠すルール、0.4.0 のレイアウトの大きさが変わらないこと
 
 ## 0.4.0 — 2026-10-24
 

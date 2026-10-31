@@ -62,41 +62,41 @@ const WidgetText kJapanese = {
     "左手 ",
     "右手 ",
     "現在時刻",
-    // The full (non-compact) rows and the process lists (English until translated)
-    "CPU items",           // TODO(ja)
-    "RAM items",           // TODO(ja)
-    " ms  ·  max ",        // TODO(ja)
-    "capped from ",        // TODO(ja)
-    "Unmeasured",          // TODO(ja)
-    "Charge",              // TODO(ja)
-    "design",              // TODO(ja)
-    "To full",             // TODO(ja)
-    "To empty",            // TODO(ja)
-    "Health",              // TODO(ja)
-    "cycles",              // TODO(ja)
-    "Charger",             // TODO(ja)
-    "Set current",         // TODO(ja)
-    "USB",                 // TODO(ja)
-    "Unplugged",           // TODO(ja)
-    "PD offered",          // TODO(ja)
-    "Arriving",            // TODO(ja)
-    "Sag",                 // TODO(ja)
-    " high",               // TODO(ja)
-    "NPU",                 // TODO(ja)
-    "Camera",              // TODO(ja)
-    "Video",               // TODO(ja)
-    "Wi-Fi",               // TODO(ja)
-    "Flash",               // TODO(ja)
-    "nRF",                 // TODO(ja)
-    "Connector",           // TODO(ja)
-    "CPU % of one core",   // TODO(ja)
-    "RSS",                 // TODO(ja)
-    "IP ",                 // TODO(ja)
-    "Uptime",              // TODO(ja)
-    "App",                 // TODO(ja)
-    "none (SteamVR home)", // TODO(ja)
-    "HUD cost",            // TODO(ja)
-    "hide_rules.json has an error, using the last rules",  // TODO(ja)
+    // 小さく表示しないときの行と、プロセスの一覧
+    "CPU 上位",
+    "メモリ上位",
+    " ms  ·  最大 ",
+    "本来 ",
+    "未計測",
+    "容量",
+    "設計",
+    "満充電まで",
+    "空になるまで",
+    "電池の状態",
+    "サイクル",
+    "充電モード",
+    "設定電流",
+    "USB",
+    "未接続",
+    "PD 出力",
+    "実際の入力",
+    "電圧の落ち",
+    " 大きめ",
+    "NPU",
+    "カメラ",
+    "映像",
+    "Wi-Fi",
+    "ストレージ",
+    "nRF",
+    "端子",
+    "1 コアに対する %",
+    "実メモリ",
+    "IP ",
+    "起動から",
+    "アプリ",
+    "なし（SteamVR ホーム）",
+    "パネル負荷",
+    "hide_rules.json にエラー。前のルールを使っています",
 };
 
 const WidgetText kEnglish = {

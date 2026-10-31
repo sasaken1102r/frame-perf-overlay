@@ -57,7 +57,10 @@ bool parseProcStat(const char* text, size_t length, ProcStat& out) {
 std::string processDisplayName(const std::string& comm, const std::string& exe) {
     constexpr size_t kCommMax = 15;  // TASK_COMM_LEN - 1
     const bool commCut = comm.size() == kCommMax && exe.size() > kCommMax && exe.compare(0, kCommMax, comm) == 0;
-    const bool exeShorter = !exe.empty() && exe.size() < comm.size() && comm.compare(0, exe.size(), exe) == 0;
+    // A thread name ("vrlinkrunthread") also fills all 15. A shorter comm is its own name: pipewire-pulse runs the
+    // pipewire binary through a link, and should stay pipewire-pulse
+    const bool exeShorter = comm.size() == kCommMax && !exe.empty() && exe.size() < comm.size() &&
+                            comm.compare(0, exe.size(), exe) == 0;
     return commCut || exeShorter ? exe : comm;
 }
 

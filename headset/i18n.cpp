@@ -123,10 +123,10 @@ const UiText kJapanese = {
     "今のレイアウトはどのプロファイルにも保存されていません",
     "プロファイルに入るのはレイアウト（列・ウィジェットとその設定）だけ。位置やアプリの設定は入りません",
     "プロファイルの名前",
-    // The layout editor's widget settings (English until translated)
-    "Rows",            // TODO(ja)
-    "One row per name",  // TODO(ja)
-    "Hide system",     // TODO(ja)
+    // レイアウトの編集：ウィジェットの設定
+    "行数",
+    "同じ名前は 1 行に",
+    "システムを隠す",
 };
 
 const UiText kEnglish = {

@@ -361,6 +361,7 @@ void displayNameFromCapturedList(const std::string& fixtureDir) {
         {"dbus-broker-lau|dbus-broker-launch", "dbus-broker-launch"},
         {"V4L2Cam|v4l2cam", "V4L2Cam"},
         {"bash|bash", "bash"},
+        {"pipewire-pulse|pipewire", "pipewire-pulse"},
     };
     for (const auto& w : want) {
         const auto it = got.find(w.first);
