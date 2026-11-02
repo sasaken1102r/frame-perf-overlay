@@ -2,6 +2,7 @@
 #pragma once
 
 #include "config.h"
+#include "detached.h"  // Room: GrabInput, DetachedPose
 #include "history.h"
 #include "placement.h"
 #include "vk_texture.h"
@@ -45,11 +46,14 @@ struct VrEvents {
     std::string keyboardText;
     bool keyboardClosed = false;        ///< the keyboard closed without Done
     bool sceneAppChanged = false;       ///< VREvent_SceneApplicationChanged arrived: re-query the scene app
+    std::vector<GrabInput> grab;        ///< Room: laser presses on the panel (the grab)
+    bool dashboardClosed = false;       ///< Room: VREvent_DashboardDeactivated arrived
 
     /** イベントを捨て、次の読み取りに配列の容量を再利用する。 */
     void clear() {
-        quit = closeRequested = keyboardDone = keyboardClosed = sceneAppChanged = false;
+        quit = closeRequested = keyboardDone = keyboardClosed = sceneAppChanged = dashboardClosed = false;
         pointer.clear();
+        grab.clear();
         keyboardText.clear();
     }
 };
@@ -252,7 +256,39 @@ public:
     bool showKeyboard(const std::string& description, const std::string& existing, uint32_t maxChars,
                       std::string& error);
 
+    /**
+     * Room: lets the laser hit the panel (input method Mouse) or not (None). Mouse only while the dashboard is open
+     * and the panel is Detached, so the panel never takes game input. A new overlay (reconnect) starts at None.
+     * @param interactive Mouse if true
+     */
+    void setPanelInteractive(bool interactive);
+
+    /** Room: @return true while the panel takes mouse input */
+    bool panelInteractive() const { return panelInteractive_; }
+
+    /**
+     * Room: a device's standing-space pose, now.
+     * @param device tracked device index (0 = HMD)
+     * @param pose the pose
+     * @return false if not connected or the pose isn't valid
+     */
+    bool devicePose(uint32_t device, vr::HmdMatrix34_t& pose) const;
+
+    /**
+     * Room: moves the Detached panel at once (while a grab is held), without waiting for updatePlacement.
+     * @param pose the standing-space pose
+     */
+    void setDetachedTransform(const DetachedPose& pose);
+
 private:
+    // Room: the curve, an arc in degrees (curvature = degrees / 360), so the radius follows the panel's width
+    float wantCurvature_ = 0.0f;     ///< 0 = flat (head, wrist, or Detached at 0°)
+    float appliedCurvature_ = 0.0f;  ///< what SetOverlayCurvature last took
+    /** Sends wantCurvature_ when it changed (a refused call is tried again on the next updatePlacement). */
+    void applyCurvature();
+    bool panelInteractive_ = false;  ///< Room: the panel's input method is Mouse
+    DetachedPose appliedDetached_;   ///< Room: the pose last given to SetOverlayTransformAbsolute
+
     bool connected_ = false;
     uint32_t attachedDevice_ = 0xffffffff;  ///< 変換を渡してある機器（0xffffffff = vr::k_unTrackedDeviceIndexInvalid = まだ）
     bool transformDirty_ = true;            ///< 変換を渡し直す必要がある（設定が変わった・前回断られた）

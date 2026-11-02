@@ -47,6 +47,7 @@ add_executable(frame-perf-overlay
   headset/placement.cpp
   headset/clock.cpp
   headset/config.cpp
+  headset/detached.cpp
   headset/sensors.cpp
   headset/sensor_math.cpp
   headset/system_metrics.cpp
@@ -114,6 +115,7 @@ if(BUILD_TESTING)
     headset/placement.cpp
     headset/clock.cpp
     headset/config.cpp
+    headset/detached.cpp
     headset/settings_panel.cpp
     headset/layout_editor.cpp
     headset/i18n.cpp
@@ -209,4 +211,12 @@ if(BUILD_TESTING)
   target_compile_options(hide-rules-test PRIVATE -Wall -Wextra)
   target_link_libraries(hide-rules-test PRIVATE frame-perf-core)
   add_test(NAME hide-rules COMMAND hide-rules-test ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
+
+  # Room: the pose maths (grab, place in front, face, nudge, rotate, curve) and the config's detached_* keys
+  add_executable(detached-test tests/detached_test.cpp headset/detached.cpp headset/placement.cpp headset/config.cpp
+                 headset/i18n.cpp)
+  target_include_directories(detached-test PRIVATE headset core/render third_party/openvr)
+  target_compile_options(detached-test PRIVATE -Wall -Wextra)
+  target_link_libraries(detached-test PRIVATE frame-perf-core)
+  add_test(NAME detached COMMAND detached-test)
 endif()

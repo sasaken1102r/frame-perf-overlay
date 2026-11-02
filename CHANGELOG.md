@@ -2,6 +2,15 @@
 
 ## 未リリース
 
+### Room: pin the panel in the room (finaea's PR)
+
+- A fourth attach point on the Placement page, **Room**: the panel stays at a fixed spot in the room (SteamVR's standing space) instead of following your head or a hand. The first time you pick it, it goes 1 m in front of you at eye height, facing you
+- While the dashboard is open, point the laser at the panel and hold the trigger to carry it; it follows the controller and is saved where you let go (closing the dashboard counts as letting go). With the dashboard closed it doesn't take the laser, so it never takes game input
+- The Placement page in Room: **Bring it in front of me**, the nudge and Closer / Farther buttons (2 cm / 5 cm along the panel itself), the facing buttons (turn it about its own axes), **Face me** (upright, facing you), and **Curve** − / + (bends the panel around you, 0° flat to 90° of arc in 10° steps; a wider panel bends around a bigger circle). Only the Room panel curves; head and wrist stay flat
+- Shown in Room means on, placed and shown by SteamVR, so the reads and redraws pause exactly as before when the panel is off. Head and wrist (and the wrist-down pause) don't change
+- New settings keys `detached_pose` (12 numbers, written once the panel has been put in the room) and `detached_curve_deg` (written only when it isn't 0), and the `attachment` value `"detached"`. A settings file that never used Room loads and saves exactly as before
+- Tests added: the pose maths (place in front, face me, nudge, turn, the laser grab), the curve, the new keys, and a 0.4.0 settings file round-tripping with no new keys
+
 ### 小さく表示しないときの行・「CPU 上位」・「メモリ上位」（finaea さんの PR #5）
 
 - 「小さく表示」のスイッチを、もっと出せるものがあるカード全部に付けた（「GPU・メモリ」以外）。「フレーム」「CPU」「電力」「通信」「その他」は小さく表示で始まり、それが 0.4.0 のカードとまったく同じなので、更新してもパネルの形は変わらない（既定のレイアウトも同じ）。小さく表示をオフにすると:

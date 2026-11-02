@@ -154,6 +154,12 @@ struct UiText {
     const char* rowItems;            ///< CPU / RAM items: rows shown
     const char* rowSumSameName;      ///< one row per process name
     const char* rowHideSystem;       ///< leave out SteamOS / Steam / SteamVR (hide_rules.json)
+    // ---- Room: the panel pinned in the room (Attachment::Detached, shown as Room) ----
+    const char* attachRoom;          ///< attach point: Room
+    const char* bringInFront;        ///< Room: put it 1 m in front of the HMD
+    const char* roomHint;            ///< Room: how to move it with the laser
+    const char* roomNotPlaced;       ///< Room: no pose yet
+    const char* rowCurve;            ///< Room: the curve row (degrees of arc)
 };
 
 /**

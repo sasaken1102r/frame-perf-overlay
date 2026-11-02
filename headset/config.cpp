@@ -175,6 +175,7 @@ const char* attachmentName(Attachment attachment) {
     switch (attachment) {
         case Attachment::LeftWrist: return "left_wrist";
         case Attachment::RightWrist: return "right_wrist";
+        case Attachment::Detached: return "detached";
         case Attachment::Head: break;
     }
     return "head";
@@ -229,7 +230,7 @@ bool loadConfig(const std::string& path, Config& out, std::vector<std::string>& 
                     {"visible", "update_check", "language", "attachment", "position", "rotation", "left_wrist",
                      "right_wrist", "wrist_fade", "wrist_fade_end_deg", "clock_format", "width_m", "alpha",
                      "update_interval_ms", "graph_seconds", "font", "font_bold", "thresholds", "layout",
-                     "active_profile"},
+                     "active_profile", "detached_pose", "detached_curve_deg"},
                     "", warnings);
     readBool(root, "visible", config.visible, warnings);
     readBool(root, "update_check", config.updateCheck, warnings);
@@ -243,9 +244,26 @@ bool loadConfig(const std::string& path, Config& out, std::vector<std::string>& 
         config.attachment = Attachment::LeftWrist;
     } else if (attachment == "right_wrist") {
         config.attachment = Attachment::RightWrist;
+    } else if (attachment == "detached") {
+        config.attachment = Attachment::Detached;
     } else if (attachment != "head") {
         warnings.push_back("attachment は \"head\" か \"left_wrist\" か \"right_wrist\" で書いてください");
     }
+    // Room: the pose, 12 numbers (3×4, row by row). Anything else is ignored, and the panel is placed in front again
+    if (const JsonValue* pose = root.get("detached_pose")) {
+        bool ok = pose->type == JsonValue::Type::Array && pose->items.size() == 12;
+        for (size_t i = 0; ok && i < 12; ++i) ok = pose->items[i].isNumber() && std::isfinite(pose->items[i].number);
+        if (ok) {
+            for (size_t i = 0; i < 12; ++i) config.detachedPose.m[i / 4][i % 4] = pose->items[i].number;
+            config.detachedPose.valid = true;
+        } else {
+            warnings.push_back("detached_pose must be 12 numbers (a 3x4 matrix, row by row); it will be placed again");
+        }
+    }
+    // Room: the arc the panel wraps, 0..90°, rounded to a 10° step
+    double curveDeg = config.detachedCurveDeg;
+    readNumber(root, "detached_curve_deg", 0.0, 90.0, curveDeg, warnings);
+    config.detachedCurveDeg = static_cast<int>(std::lround(curveDeg / 10.0)) * 10;
     if (const JsonValue* position = root.get("position")) {
         if (position->isObject()) {
             warnUnknownKeys(*position, {"x", "y", "z"}, "position.", warnings);
@@ -369,7 +387,16 @@ bool saveConfig(const std::string& path, const Config& config, std::string& erro
     for (const auto& field : kThresholdFields) {
         std::fprintf(file, "    \"%s\": %.4g%s\n", field.key, config.thresholds.*field.member, &field == last ? "" : ",");
     }
-    std::fprintf(file, "  },\n  \"active_profile\": %s,\n  \"layout\": %s\n}\n", jsonString(config.activeProfile).c_str(),
+    std::fprintf(file, "  },\n");
+    // Room: written only once it's been used, so a config that never used it saves exactly as before
+    if (config.detachedPose.valid) {
+        std::fprintf(file, "  \"detached_pose\": [");
+        // 6 digits: a rotation saved with 4 would drift visibly from orthonormal over a few saves
+        for (int i = 0; i < 12; ++i) std::fprintf(file, "%s%.6g", i ? ", " : "", config.detachedPose.m[i / 4][i % 4] + 0.0);
+        std::fprintf(file, "],\n");
+    }
+    if (config.detachedCurveDeg != 0) std::fprintf(file, "  \"detached_curve_deg\": %d,\n", config.detachedCurveDeg);
+    std::fprintf(file, "  \"active_profile\": %s,\n  \"layout\": %s\n}\n", jsonString(config.activeProfile).c_str(),
                  frame_perf_overlay::layoutToJson(config.layout, 2).c_str());
     // The data must be on disk before the rename makes it the config (a power cut right after could leave an
     // empty file otherwise)
@@ -405,6 +432,7 @@ void resetDisplaySettings(Config& config) {
     config.clockFormat = defaults.clockFormat;
     config.widthM = defaults.widthM;
     config.alpha = defaults.alpha;
+    config.detachedCurveDeg = defaults.detachedCurveDeg;  // the room pose itself is kept
 }
 
 namespace {

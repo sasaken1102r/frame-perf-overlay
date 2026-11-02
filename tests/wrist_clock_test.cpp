@@ -688,9 +688,10 @@ void controls(const std::string& directory) {
         {SettingsAction::ClockOff, 168, 425, 96, 68}, {SettingsAction::Clock12, 264, 425, 96, 68},
         {SettingsAction::Clock24, 360, 425, 96, 68}, {SettingsAction::Reset, 168, 504, 288, 68},
         // 位置: 固定先・十字・近く / 遠く
-        {SettingsAction::AttachHead, 630, 188, 410.0 / 3, 68},
-        {SettingsAction::AttachLeft, 630 + 410.0 / 3, 188, 410.0 / 3, 68},
-        {SettingsAction::AttachRight, 630 + 820.0 / 3, 188, 410.0 / 3, 68},
+        {SettingsAction::AttachHead, 630, 188, 410.0 / 4, 68},
+        {SettingsAction::AttachLeft, 630 + 410.0 / 4, 188, 410.0 / 4, 68},
+        {SettingsAction::AttachRight, 630 + 820.0 / 4, 188, 410.0 / 4, 68},
+        {SettingsAction::AttachDetached, 630 + 1230.0 / 4, 188, 410.0 / 4, 68},
         {SettingsAction::MoveUp, 637, 425, 106, 68}, {SettingsAction::MoveLeft, 520, 504, 106, 68},
         {SettingsAction::MoveDown, 637, 504, 106, 68}, {SettingsAction::MoveRight, 754, 504, 106, 68},
         {SettingsAction::MoveNear, 870, 425, 170, 68}, {SettingsAction::MoveFar, 870, 504, 170, 68},
@@ -727,7 +728,7 @@ void controls(const std::string& directory) {
         CHECK(panel.writePng(directory + "/head-" + code + ".png"));
         // 左手・右手: 同じ場所の十字と向きのボタンのまま、位置のボタンといちばん下の段だけ変わる
         for (const SettingsAction attach : {SettingsAction::AttachLeft, SettingsAction::AttachRight}) {
-            CHECK(panel.pointerDown(attach == SettingsAction::AttachLeft ? 835 : 972, 222, 2) == attach);
+            CHECK(panel.pointerDown(attach == SettingsAction::AttachLeft ? 784 : 886, 222, 2) == attach);
             CHECK(applySettingsAction(attach, c));
             panel.pointerLeave();
             panel.render(c, service, {});
@@ -762,13 +763,63 @@ void controls(const std::string& directory) {
     update.installable = true;
     c.attachment = Attachment::LeftWrist;
     panel.render(c, service, update);
-    CHECK(panel.pointerDown(960, 222, 6) == SettingsAction::AttachRight);
+    CHECK(panel.pointerDown(886, 222, 6) == SettingsAction::AttachRight);
     CHECK(panel.pointerDown(400, 459, 6) == SettingsAction::Clock24);
     panel.armUpdateConfirmForPreview();
     panel.render(c, service, update);
     CHECK(panel.pointerDown(1320, 222, 6) == SettingsAction::PitchUp);
     CHECK(panel.pointerDown(1340, 459, 6) == SettingsAction::FadeOn);
     panel.pointerLeave();
+}
+
+/** Room (Detached): its buttons sit where they are laid out, curve steps by 10 degrees within 0..90, and an unplaced pose isn't moved. */
+void roomControls(const std::string& directory) {
+    Config c;
+    c.language = Language::En;
+    c.attachment = Attachment::Detached;
+    FontSet fonts;
+    fonts.load(c.fontPath, c.boldFontPath);
+    SettingsPanel panel(fonts);
+    const AutostartStatus service {AutostartStatus::State::Enabled, false, false};
+    panel.render(c, service, {});
+    const std::vector<ExpectedButton> room = {
+        {SettingsAction::BringInFront, 520, 267, 520, 68},
+        {SettingsAction::FaceMe, 1104, 425, 448, 68},
+        {SettingsAction::CurveDown, 1264, 504, 84, 68}, {SettingsAction::CurveUp, 1468, 504, 84, 68},
+        {SettingsAction::AttachDetached, 630 + 1230.0 / 4, 188, 410.0 / 4, 68},
+    };
+    checkButtons(panel, room, 1);
+    panel.pointerLeave();
+    CHECK(panel.writePng(directory + "/room-en.png"));
+
+    // The curve steps by 10 and clamps to 0..90
+    CHECK(!applySettingsAction(SettingsAction::CurveDown, c));
+    CHECK(c.detachedCurveDeg == 0);
+    for (int i = 1; i <= 9; ++i) {
+        CHECK(applySettingsAction(SettingsAction::CurveUp, c));
+        CHECK(c.detachedCurveDeg == 10 * i);
+    }
+    CHECK(!applySettingsAction(SettingsAction::CurveUp, c));
+    CHECK(c.detachedCurveDeg == 90);
+    CHECK(applySettingsAction(SettingsAction::CurveDown, c));
+    CHECK(c.detachedCurveDeg == 80);
+
+    // Move / turn / presets on a pose that was never placed change nothing
+    c.detachedCurveDeg = 0;
+    CHECK(!c.detachedPose.valid);
+    const Config before = c;
+    for (const SettingsAction a : {SettingsAction::MoveLeft, SettingsAction::MoveUp, SettingsAction::MoveNear,
+                                   SettingsAction::YawRight, SettingsAction::PitchUp, SettingsAction::RollLeft,
+                                   SettingsAction::FaceMe, SettingsAction::PresetLeftTop, SettingsAction::BringInFront}) {
+        CHECK(!applySettingsAction(a, c));
+        CHECK(c.detachedPose == before.detachedPose && c.attachment == Attachment::Detached);
+        CHECK(c.posX == before.posX && c.posY == before.posY && c.posZ == before.posZ && c.yawDeg == before.yawDeg);
+    }
+    // On a placed pose a move button does move it
+    c.detachedPose.valid = true;
+    CHECK(applySettingsAction(SettingsAction::MoveRight, c));
+    CHECK(c.detachedPose.m[0][3] > 0);
+    CHECK(!applySettingsAction(SettingsAction::FaceMe, c));  // the caller does Face me (it needs the HMD)
 }
 
 }  // namespace
@@ -789,7 +840,8 @@ int main() {
         configuration(std::string(directory) + "/config.json");
         panelHeights(directory);
         controls(directory);
-        std::cout << "Geometry, rotation convention, panel-axis nudges, polling, placement recovery, clock, config, panel heights and UI controls passed.\n";
+        roomControls(directory);
+        std::cout << "Geometry, rotation convention, panel-axis nudges, polling, placement recovery, clock, config, panel heights, UI controls and Room controls passed.\n";
         std::filesystem::remove_all(directory);
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << " (artifacts: " << directory << ")\n";
