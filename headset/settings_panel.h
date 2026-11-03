@@ -91,6 +91,11 @@ enum class SettingsAction {
     ProfileRename,    ///< SteamVR's keyboard for the selected profile's name
     ProfileDelete,    ///< delete the selected profile
     ProfileReset,     ///< live layout -> the built-in default (profiles untouched)
+    // Room (Attachment::Detached)
+    AttachDetached,   ///< pin the panel in the room (the caller places it in front when it has no pose yet)
+    BringInFront,     ///< 1 m in front of the HMD (the caller does it: it needs the HMD pose)
+    CurveDown,        ///< 10° less arc (config.detachedCurveDeg, 0..90, saved)
+    CurveUp,          ///< 10° more arc
 };
 
 /** Which page the dashboard tab shows. */
@@ -98,6 +103,8 @@ enum class SettingsPage { Layout, Placement, Profiles };
 
 /**
  * 操作を設定に反映する（Quit と None は何もしない）。位置と向きのボタンは、今の固定先（頭・左手・右手）の値を動かす。
+ * Room (Detached): they move / turn the room pose along the panel's own axes; Face me and Bring it in front need the
+ * HMD pose, so the caller does those.
  * @param action 操作
  * @param config 書き換える設定
  * @param angleStepDeg 向きのボタン（左右・上下・回す）の刻み（度。1 か 5）。その刻みの目盛りに寄せて動かす
@@ -268,7 +275,8 @@ private:
     std::vector<uint8_t> rgba_;
     std::vector<Button> buttons_;
     /** Which set of card buttons is laid out (was wristLayout_, a bool). */
-    enum class ButtonMode { Layout, Head, Wrist, Profiles };
+    enum class ButtonMode { Layout, Head, Wrist, Detached, Profiles };
+
     ButtonMode mode_ = ButtonMode::Head;  ///< 今のボタンの配置（固定先・ページが変わったら render() で置き直す）
     SettingsPage page_ = SettingsPage::Placement;  ///< The tab opens on Placement, the first page
     LayoutEditor editor_;                       ///< the Layout page

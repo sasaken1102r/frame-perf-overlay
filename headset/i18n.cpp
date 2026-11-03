@@ -127,6 +127,12 @@ const UiText kJapanese = {
     "行数",
     "同じ名前は 1 行に",
     "システムを隠す",
+    // Room
+    "Room",                                                         // TODO(ja)
+    "Bring it in front of me",                                      // TODO(ja)
+    "Point the laser at the panel and hold the trigger to move it",  // TODO(ja)
+    "Not placed yet",                                               // TODO(ja)
+    "Curve",                                                        // TODO(ja)
 };
 
 const UiText kEnglish = {
@@ -175,6 +181,9 @@ const UiText kEnglish = {
     "Profile name",
     // The layout editor's widget settings
     "Rows", "One row per name", "Hide system",
+    // Room
+    "Room", "Bring it in front of me", "Point the laser at the panel and hold the trigger to move it",
+    "Not placed yet", "Curve",
 };
 
 }  // namespace
