@@ -253,7 +253,7 @@ void testGrabKeepsThePanelRigid() {
     CHECK(!grab.active());
 }
 
-// stepGrab: one main-loop pass of laser input. The dashboard closing ends the grab even with the trigger still held
+// stepGrab: one main-loop pass of laser input. The dashboard closing ends the grab even with the mouse still down
 void testStepGrab() {
     const vr::HmdMatrix34_t A = anyPose(20, -35, 10, 0.2, 1.0, -0.4);
     const vr::HmdMatrix34_t B = anyPose(50, -10, 0, 0.6, 1.2, -0.9);
@@ -270,7 +270,7 @@ void testStepGrab() {
     };
     const GrabInput press {true, 1}, release {false, 1};
 
-    // The dashboard closes with the trigger held and no mouse-up
+    // The dashboard closes with no mouse-up
     {
         DetachedGrab grab;
         DetachedPose pose = start;
@@ -288,7 +288,7 @@ void testStepGrab() {
         CHECK(s.released && !s.moved && !grab.active());
         CHECK(pose == atB);  // kept at the last followed pose, not dragged to C
 
-        // Trigger still held, device keeps moving: nothing follows, nothing restarts
+        // Device keeps moving: nothing follows, nothing restarts
         devices[1] = A;
         s = stepGrab(grab, {}, false, true, devicePose, pose);
         CHECK(!s.released && !s.moved && !grab.active() && pose == atB);
@@ -326,6 +326,117 @@ void testStepGrab() {
         DetachedPose unplaced;
         s = stepGrab(grab, {press}, false, true, devicePose, unplaced);
         CHECK(!grab.active() && !s.moved && !s.released && !unplaced.valid);
+    }
+}
+
+// stepGrab: the dashboard's laser going to another controller ends a grab with no mouse-up, and a setting changed
+// meanwhile ends it too
+void testStepGrabLaserAndActions() {
+    const vr::HmdMatrix34_t A = anyPose(20, -35, 10, 0.2, 1.0, -0.4);
+    const vr::HmdMatrix34_t B = anyPose(50, -10, 0, 0.6, 1.2, -0.9);
+    const vr::HmdMatrix34_t C = anyPose(-80, 15, 5, -1.0, 0.5, 0.7);
+    const DetachedPose start = fromHmdMatrix(anyPose(-60, 5, 0, 0.4, 1.5, -1.2));
+    const DetachedPose action = fromHmdMatrix(anyPose(10, 0, 0, 0.0, 1.6, -1.0));
+    const vr::HmdMatrix34_t offset = composeTransform(invertRigid(A), toHmdMatrix(start));
+    const uint32_t none = vr::k_unTrackedDeviceIndexInvalid;
+
+    std::map<uint32_t, vr::HmdMatrix34_t> devices;
+    const auto devicePose = [&](uint32_t d, vr::HmdMatrix34_t& out) {
+        const auto it = devices.find(d);
+        if (it == devices.end()) return false;
+        out = it->second;
+        return true;
+    };
+    const GrabInput press {true, 1}, release {false, 1};
+
+    // The laser goes to another controller mid-grab: the grab ends, nothing follows, pose stays at the last followed one
+    {
+        DetachedGrab grab;
+        DetachedPose pose = start;
+        devices[1] = A;
+        GrabStep s = stepGrab(grab, {press}, false, true, devicePose, pose, 1);
+        CHECK(grab.active() && s.moved && !s.released && !s.laserMoved);
+        devices[1] = B;
+        s = stepGrab(grab, {}, false, true, devicePose, pose, 1);
+        const DetachedPose atB = fromHmdMatrix(composeTransform(B, offset));
+        CHECK(grab.active() && s.moved && !s.released && nearPose(pose, atB, 5e-4));
+        const DetachedPose followed = pose;
+        devices[1] = C;
+        s = stepGrab(grab, {}, false, true, devicePose, pose, 2);
+        CHECK(s.released && s.laserMoved && !s.moved && !grab.active() && pose == followed);
+        // The laser stays away, or comes back, and the device keeps moving: nothing follows, nothing restarts
+        for (uint32_t laser : {2u, 1u}) {
+            devices[1] = A;
+            s = stepGrab(grab, {}, false, true, devicePose, pose, laser);
+            CHECK(!s.released && !s.laserMoved && !s.moved && !grab.active() && pose == followed);
+        }
+    }
+    // An invalid laser device, or the grabbing one, doesn't end the grab; a mouse-up still does, without laserMoved
+    for (uint32_t laser : {none, 1u}) {
+        DetachedGrab grab;
+        DetachedPose pose = start;
+        devices[1] = A;
+        stepGrab(grab, {press}, false, true, devicePose, pose, laser);
+        for (int i = 0; i < 4; i++) {
+            devices[1] = i % 2 ? B : C;
+            const GrabStep s = stepGrab(grab, {}, false, true, devicePose, pose, laser);
+            CHECK(grab.active() && s.moved && !s.released && !s.laserMoved);
+        }
+        const GrabStep s = stepGrab(grab, {release}, false, true, devicePose, pose, laser);
+        CHECK(s.released && !s.laserMoved && !grab.active());
+    }
+    // A blip: the laser is on device 2 for one pass and back on 1. The grab ends once, then doesn't restart
+    {
+        DetachedGrab grab;
+        DetachedPose pose = start;
+        devices[1] = A;
+        stepGrab(grab, {press}, false, true, devicePose, pose, 1);
+        devices[1] = B;
+        GrabStep s = stepGrab(grab, {}, false, true, devicePose, pose, 2);
+        CHECK(s.released && s.laserMoved && !grab.active());
+        const DetachedPose kept = pose;
+        devices[1] = C;
+        s = stepGrab(grab, {}, false, true, devicePose, pose, 1);
+        CHECK(!s.released && !s.laserMoved && !s.moved && !grab.active() && pose == kept);
+    }
+    // Order: a mouse-up and the laser on another controller in one pass release once, and it isn't laserMoved
+    {
+        DetachedGrab grab;
+        DetachedPose pose = start;
+        devices[1] = A;
+        stepGrab(grab, {press}, false, true, devicePose, pose, 1);
+        devices[1] = B;
+        GrabStep s = stepGrab(grab, {release}, false, true, devicePose, pose, 2);
+        CHECK(s.released && !s.laserMoved && !s.moved && !grab.active());
+        s = stepGrab(grab, {}, false, true, devicePose, pose, 2);
+        CHECK(!s.released && !s.laserMoved && !s.moved);
+    }
+    // A Placement action during a grab: main applies it to pose first, then endGrab ends the grab and keeps it
+    {
+        DetachedGrab grab;
+        DetachedPose pose = start;
+        devices[1] = A;
+        stepGrab(grab, {press}, false, true, devicePose, pose);
+        devices[1] = B;
+        pose = action;
+        GrabStep s = stepGrab(grab, {press}, true, true, devicePose, pose);  // press in the same pass: no restart
+        CHECK(s.released && !s.moved && !grab.active() && pose == action);
+        s = stepGrab(grab, {}, false, true, devicePose, pose);
+        CHECK(!s.released && !s.moved && !grab.active() && pose == action);
+    }
+    // An attach change during a grab: pose unchanged, the grab ends, nothing follows afterwards
+    {
+        DetachedGrab grab;
+        DetachedPose pose = start;
+        devices[1] = A;
+        stepGrab(grab, {press}, false, true, devicePose, pose);
+        const DetachedPose before = pose;
+        devices[1] = B;
+        GrabStep s = stepGrab(grab, {}, true, true, devicePose, pose);
+        CHECK(s.released && !s.moved && !grab.active() && pose == before);
+        devices[1] = C;
+        s = stepGrab(grab, {}, false, true, devicePose, pose);
+        CHECK(!s.moved && !s.released && pose == before);
     }
 }
 
@@ -808,6 +919,7 @@ int main() {
     testOrthonormalize();
     testGrabKeepsThePanelRigid();
     testStepGrab();
+    testStepGrabLaserAndActions();
     testPlaceInFront();
     testFaceTowards();
     testNudge();

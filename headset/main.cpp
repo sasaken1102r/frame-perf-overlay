@@ -772,16 +772,20 @@ bool applyDetachedAction(SettingsAction action, Config& config, const VrOverlay&
     return config.detachedPose != before;
 }
 
-/** Applies a dashboard action to the config, to the panel, and saves the config file. */
-void handleSettingsAction(SettingsAction action, Config& config, ConfigWatcher& watcher, VrOverlay& vr,
+/**
+ * Applies a dashboard action to the config, to the panel, and saves the config file.
+ * @return true if a setting changed (Room: that ends a drag in progress)
+ */
+bool handleSettingsAction(SettingsAction action, Config& config, ConfigWatcher& watcher, VrOverlay& vr,
                           double angleStepDeg = 1.0) {
     bool changed = applySettingsAction(action, config, angleStepDeg);
     changed |= applyDetachedAction(action, config, vr);  // Room
-    if (!changed) return;
+    if (!changed) return false;
     vr.applyConfig(config);
     std::string error;
     // Through the watcher, so an unreadable file is kept as config.json.bad instead of being overwritten
     if (!watcher.save(config, error)) std::fprintf(stderr, "[config] Saving failed: %s\n", error.c_str());
+    return true;
 }
 
 /** @return the single-instance lock file path */
@@ -1315,6 +1319,7 @@ int runOverlay(const Options& options) {
         }
 
         // Pointer on the dashboard tab
+        bool settingChanged = false;  // Room: a setting changed in this pass ends a drag (the setting wins)
         if (!events.pointer.empty()) {
             lastPointerEvent = loopStart;
             // A press works on the layout as it is now (a file reload may have changed it)
@@ -1355,7 +1360,7 @@ int runOverlay(const Options& options) {
                         refreshProfilesUi();
                         nextPanel = std::min(nextPanel, nowSeconds());  // a new layout shows on the panel now
                     } else {
-                        handleSettingsAction(action, config, watcher, vr, settings.angleStepDeg());
+                        settingChanged |= handleSettingsAction(action, config, watcher, vr, settings.angleStepDeg());
                     }
                     settingsDirty = true;
                     break;
@@ -1383,14 +1388,24 @@ int runOverlay(const Options& options) {
 
         // ---- Room: press on the panel = grab; it follows the laser until release or a dashboard close ----
         const bool wasGrabbing = grab.active();
-        const GrabStep step = stepGrab(grab, events.grab, events.dashboardClosed,
+        // A setting changed this pass (Bring it in front, Face me, a nudge, the attach point, Reset, ...) ends a drag
+        // with the setting's result, and so does a dashboard close. So does the laser going to the other controller
+        // (its grip): SteamVR then never sends the mouse-up
+        const uint32_t laserDevice = wasGrabbing ? vr.dashboardLaserDevice() : vr::k_unTrackedDeviceIndexInvalid;
+        const GrabStep step = stepGrab(grab, events.grab, events.dashboardClosed || settingChanged,
                                        vr.panelInteractive() && config.attachment == Attachment::Detached, devicePose,
-                                       config.detachedPose);  // in memory; saved on release
+                                       config.detachedPose, laserDevice);  // in memory; saved on release
         if (events.dashboardClosed) vr.setPanelInteractive(false);  // the panel stops taking the laser at once
         if (!wasGrabbing && grab.active()) std::fprintf(stderr, "[room] grabbed with device %u\n", grab.device());
-        if (step.released) saveReleasedPose(events.dashboardClosed ? "dashboard closed" : "laser released");
-        if (step.moved) vr.setDetachedTransform(config.detachedPose);
-
+        if (step.released) {
+            char why[48] = "laser released";
+            if (events.dashboardClosed) std::snprintf(why, sizeof(why), "dashboard closed");
+            else if (settingChanged) std::snprintf(why, sizeof(why), "setting changed");
+            else if (step.laserMoved) std::snprintf(why, sizeof(why), "laser moved to device %u", laserDevice);
+            saveReleasedPose(why);
+        }
+        // Only a Detached panel goes to room space (an attach change mid-drag must not put it back there)
+        if (step.moved && config.attachment == Attachment::Detached) vr.setDetachedTransform(config.detachedPose);
 
         if (metricsTick) {
             settingsDirty |= settings.tick(loopStart);  // "press again to quit" expiry

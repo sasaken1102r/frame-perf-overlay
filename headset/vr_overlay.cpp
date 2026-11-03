@@ -874,6 +874,11 @@ bool VrOverlay::devicePose(uint32_t device, vr::HmdMatrix34_t& pose) const {
     return true;
 }
 
+uint32_t VrOverlay::dashboardLaserDevice() const {
+    if (!connected_) return vr::k_unTrackedDeviceIndexInvalid;
+    return vr::VROverlay()->GetPrimaryDashboardDevice();
+}
+
 void VrOverlay::setDetachedTransform(const DetachedPose& pose) {
     if (!connected_ || panelHandle_ == 0 || !pose.valid) return;
     const vr::HmdMatrix34_t m = toHmdMatrix(pose);

@@ -143,21 +143,29 @@ private:
 
 /** What one stepGrab pass did. */
 struct GrabStep {
-    bool released = false;  ///< a grab ended: save pose (it's where the panel was last shown)
-    bool moved = false;     ///< pose follows the laser: show it there now
+    bool released = false;    ///< a grab ended: save pose (it's where the panel was last shown)
+    bool laserMoved = false;  ///< ...because the dashboard's laser went to another controller
+    bool moved = false;       ///< pose follows the laser: show it there now
 };
 
 /**
- * One main-loop pass of laser input on the Detached panel, in this order: a dashboard close ends the grab first (so
- * nothing after it is followed, and the pose saved is the last one shown), then presses and releases as they came,
- * then the follow.
+ * One main-loop pass of laser input on the Detached panel, in this order: endGrab ends the grab first (so nothing
+ * after it is followed, and pose stays as it is), then presses and releases as they came, then the laser check, then
+ * the follow.
+ *
+ * The laser check ends the grab when the dashboard's laser is on another controller than the grabbing one (its grip
+ * moves the laser, even for a moment, and then SteamVR never sends the mouse-up). An invalid laserDevice is ignored.
  * @param grab the grab (changed)
  * @param inputs this pass's presses / releases on the panel
- * @param dashboardClosed the dashboard closed in this pass (VREvent_DashboardDeactivated)
+ * @param endGrab end any grab now: the dashboard closed (VREvent_DashboardDeactivated), or a dashboard setting
+ *                changed this pass (its pose / attach point is already in pose / the config)
  * @param interactive the panel takes the laser now (a press starts a grab only then)
  * @param devicePose a device's standing-space pose now (false = not tracked)
  * @param pose the room pose (changed while a grab follows; kept as it is on release)
+ * @param laserDevice the controller with the dashboard's laser now (IVROverlay::GetPrimaryDashboardDevice;
+ *                    vr::k_unTrackedDeviceIndexInvalid = unknown, no check)
  * @return what happened
  */
-GrabStep stepGrab(DetachedGrab& grab, const std::vector<GrabInput>& inputs, bool dashboardClosed, bool interactive,
-                  const std::function<bool(uint32_t, vr::HmdMatrix34_t&)>& devicePose, DetachedPose& pose);
+GrabStep stepGrab(DetachedGrab& grab, const std::vector<GrabInput>& inputs, bool endGrab, bool interactive,
+                  const std::function<bool(uint32_t, vr::HmdMatrix34_t&)>& devicePose, DetachedPose& pose,
+                  uint32_t laserDevice = vr::k_unTrackedDeviceIndexInvalid);

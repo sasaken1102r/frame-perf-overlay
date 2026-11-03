@@ -275,6 +275,12 @@ public:
     bool devicePose(uint32_t device, vr::HmdMatrix34_t& pose) const;
 
     /**
+     * Room: the controller with the dashboard's laser now (IVROverlay::GetPrimaryDashboardDevice, one IPC).
+     * @return its tracked device index, or vr::k_unTrackedDeviceIndexInvalid (not connected, none)
+     */
+    uint32_t dashboardLaserDevice() const;
+
+    /**
      * Room: moves the Detached panel at once (while a grab is held), without waiting for updatePlacement.
      * @param pose the standing-space pose
      */

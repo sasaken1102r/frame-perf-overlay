@@ -189,11 +189,13 @@ DetachedPose DetachedGrab::follow(const vr::HmdMatrix34_t& devicePose) const {
     return fromHmdMatrix(composeTransform(devicePose, offset_));
 }
 
-GrabStep stepGrab(DetachedGrab& grab, const std::vector<GrabInput>& inputs, bool dashboardClosed, bool interactive,
-                  const std::function<bool(uint32_t, vr::HmdMatrix34_t&)>& devicePose, DetachedPose& pose) {
+GrabStep stepGrab(DetachedGrab& grab, const std::vector<GrabInput>& inputs, bool endGrab, bool interactive,
+                  const std::function<bool(uint32_t, vr::HmdMatrix34_t&)>& devicePose, DetachedPose& pose,
+                  uint32_t laserDevice) {
     GrabStep step;
-    if (dashboardClosed) {
-        // Closing the dashboard counts as a release even with the trigger still held (no mouse-up may come)
+    if (endGrab) {
+        // A dashboard close counts as a release even with the laser still pressed (no mouse-up may come); a setting
+        // changed meanwhile wins over the drag
         interactive = false;
         if (grab.active()) {
             grab.end();
@@ -209,8 +211,14 @@ GrabStep stepGrab(DetachedGrab& grab, const std::vector<GrabInput>& inputs, bool
             step.released = true;
         }
     }
+    if (grab.active() && laserDevice != vr::k_unTrackedDeviceIndexInvalid && laserDevice != grab.device()) {
+        grab.end();
+        step.released = true;
+        step.laserMoved = true;
+    }
     if (grab.active()) {
         vr::HmdMatrix34_t device {};
+
         if (devicePose(grab.device(), device)) {
             pose = grab.follow(device);
             step.moved = true;
