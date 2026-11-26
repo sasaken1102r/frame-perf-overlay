@@ -1,6 +1,7 @@
 // 設定パネルの実装。
 #include "settings_panel.h"
 
+#include "detached.h"  // Room
 #include "draw.h"
 #include "i18n.h"
 #include "placement.h"
@@ -287,7 +288,8 @@ bool sameDisplaySettings(const Config& a, const Config& b) {
            a.posY == b.posY && a.posZ == b.posZ && a.yawDeg == b.yawDeg && a.pitchDeg == b.pitchDeg &&
            a.rollDeg == b.rollDeg && !(a.leftWrist != b.leftWrist) && !(a.rightWrist != b.rightWrist) &&
            a.wristFade == b.wristFade && a.wristFadeEndDeg == b.wristFadeEndDeg && a.clockFormat == b.clockFormat &&
-           a.widthM == b.widthM && a.alpha == b.alpha;
+           a.widthM == b.widthM && a.alpha == b.alpha && a.detachedPose == b.detachedPose &&
+           a.detachedCurveDeg == b.detachedCurveDeg;
 }
 
 /** Splits text into lines no wider than maxW (greedy, at spaces). */
@@ -329,12 +331,52 @@ bool applySettingsAction(SettingsAction action, Config& config, double angleStep
     // 位置と向きのボタンは、今の固定先の値を動かす（頭は posX など、手首はその手の WristPose）
     const bool wrist = config.attachment == Attachment::LeftWrist || config.attachment == Attachment::RightWrist;
     WristPose& pose = selectedWrist(config);
+    // Room: the move / turn buttons move the room pose along the panel's own axes (like the wrist). Face me and
+    // Bring it in front need the HMD pose, so the caller does those; the head's presets don't apply
+    if (config.attachment == Attachment::Detached) {
+        DetachedPose& room = config.detachedPose;
+        bool moves = true;  // a move / turn button: never falls through to the head's pose below
+        switch (action) {
+            case SettingsAction::MoveLeft: room = nudgeDetached(room, 0, -kDetachedNudgeM); break;
+            case SettingsAction::MoveRight: room = nudgeDetached(room, 0, kDetachedNudgeM); break;
+            case SettingsAction::MoveUp: room = nudgeDetached(room, 1, kDetachedNudgeM); break;
+            case SettingsAction::MoveDown: room = nudgeDetached(room, 1, -kDetachedNudgeM); break;
+            case SettingsAction::MoveNear: room = nudgeDetached(room, 2, kDetachedDepthStepM); break;
+            case SettingsAction::MoveFar: room = nudgeDetached(room, 2, -kDetachedDepthStepM); break;
+            case SettingsAction::PitchUp: room = rotateDetached(room, 0, angleStepDeg); break;
+            case SettingsAction::PitchDown: room = rotateDetached(room, 0, -angleStepDeg); break;
+            case SettingsAction::YawLeft: room = rotateDetached(room, 1, -angleStepDeg); break;
+            case SettingsAction::YawRight: room = rotateDetached(room, 1, angleStepDeg); break;
+            case SettingsAction::RollLeft: room = rotateDetached(room, 2, angleStepDeg); break;
+            case SettingsAction::RollRight: room = rotateDetached(room, 2, -angleStepDeg); break;
+            case SettingsAction::FaceMe:
+            case SettingsAction::FaceForward:
+            case SettingsAction::PresetLeftBottom:
+            case SettingsAction::PresetCenterBottom:
+            case SettingsAction::PresetRightBottom:
+            case SettingsAction::PresetLeftTop:
+            case SettingsAction::PresetRightTop:
+            case SettingsAction::PresetWrist: break;
+            default: moves = false; break;
+        }
+        if (moves) {
+            if (!before.detachedPose.valid) config.detachedPose = before.detachedPose;  // nothing to move yet
+            return config.detachedPose != before.detachedPose;
+        }
+    }
     switch (action) {
         case SettingsAction::ShowOn: config.visible = true; break;
         case SettingsAction::ShowOff: config.visible = false; break;
         case SettingsAction::AttachHead: config.attachment = Attachment::Head; break;
         case SettingsAction::AttachLeft: config.attachment = Attachment::LeftWrist; break;
         case SettingsAction::AttachRight: config.attachment = Attachment::RightWrist; break;
+        case SettingsAction::AttachDetached: config.attachment = Attachment::Detached; break;
+        case SettingsAction::CurveDown:
+            config.detachedCurveDeg = clampCurveDeg(config.detachedCurveDeg - kDetachedCurveStepDeg);
+            break;
+        case SettingsAction::CurveUp:
+            config.detachedCurveDeg = clampCurveDeg(config.detachedCurveDeg + kDetachedCurveStepDeg);
+            break;
         case SettingsAction::PresetLeftBottom:
         case SettingsAction::PresetCenterBottom:
         case SettingsAction::PresetRightBottom:
@@ -468,6 +510,7 @@ bool applySettingsAction(SettingsAction action, Config& config, double angleStep
         case SettingsAction::ProfileRename:
         case SettingsAction::ProfileDelete:
         case SettingsAction::ProfileReset:
+        case SettingsAction::BringInFront:  // needs the HMD pose: the caller does it
         case SettingsAction::None: break;
     }
     return !sameDisplaySettings(config, before);
@@ -515,6 +558,7 @@ void SettingsPanel::layoutButtons() {
     if (mode_ == ButtonMode::Layout) return;
     if (mode_ == ButtonMode::Profiles) return;  // its rows and buttons are placed as they're drawn
     const bool wristLayout = mode_ == ButtonMode::Wrist;
+    const bool detached = mode_ == ButtonMode::Detached;
 
     // 左のカード「パネル」: 表示・大きさ・透明度・時計・既定に戻す
     segmented(kRowControlX, rowY(0), kSegmentW, {SettingsAction::ShowOn, SettingsAction::ShowOff});
@@ -528,9 +572,13 @@ void SettingsPanel::layoutButtons() {
 
     // 真ん中のカード「位置」: いちばん上に固定先
     segmented(kPosInnerX + kAttachLabelW, rowY(0), kPosInnerW - kAttachLabelW,
-              {SettingsAction::AttachHead, SettingsAction::AttachLeft, SettingsAction::AttachRight});
+              {SettingsAction::AttachHead, SettingsAction::AttachLeft, SettingsAction::AttachRight,
+               SettingsAction::AttachDetached});
     const double col[3] = {kPosInnerX, kPosInnerX + kPresetW + kGap, kPosInnerX + 2 * (kPresetW + kGap)};
-    if (wristLayout) {
+    if (detached) {
+        // Room: one wide "Bring it in front of me"; the row below is the laser hint
+        add(SettingsAction::BringInFront, kPosInnerX, rowY(1), kPosInnerW, kButtonH);
+    } else if (wristLayout) {
         // 手首: 位置のボタンは「手首の標準の位置」だけ（1 段ぶちぬき）
         add(SettingsAction::PresetWrist, kPosInnerX, rowY(1), kPosInnerW, kButtonH);
     } else {
@@ -560,7 +608,13 @@ void SettingsPanel::layoutButtons() {
     add(SettingsAction::PitchDown, facingCol[1], rowY(1), kFacingArrowW, kButtonH);
     add(SettingsAction::YawRight, facingCol[2], rowY(1), kFacingArrowW, kButtonH);
     segmented(kFacingInnerX, rowY(2), kFacingInnerW, {SettingsAction::AngleStep1, SettingsAction::AngleStep5});
-    if (wristLayout) {
+    if (detached) {
+        // Room: turn it to face the HMD (upright), and the curve (− value ＋, laid out like the wrist's fade angle)
+        add(SettingsAction::FaceMe, kFacingInnerX, rowY(3), kFacingInnerW, kButtonH);
+        const double right = kFacingInnerX + kFacingInnerW;
+        add(SettingsAction::CurveDown, right - kControlW, rowY(4), kStepButtonW, kButtonH);
+        add(SettingsAction::CurveUp, right - kStepButtonW, rowY(4), kStepButtonW, kButtonH);
+    } else if (wristLayout) {
         // 手首: 傾けると消す（オン / オフ）と、消える角度（− 値 ＋）。見出しは左、ボタンは右詰め
         const double right = kFacingInnerX + kFacingInnerW;
         segmented(right - kSegmentW, rowY(3), kSegmentW, {SettingsAction::FadeOn, SettingsAction::FadeOff});
@@ -584,6 +638,8 @@ std::string SettingsPanel::labelOf(SettingsAction action, const UiText& text) co
         case SettingsAction::AttachHead: return text.attachHead;
         case SettingsAction::AttachLeft: return text.attachLeft;
         case SettingsAction::AttachRight: return text.attachRight;
+        case SettingsAction::AttachDetached: return text.attachRoom;
+        case SettingsAction::BringInFront: return text.bringInFront;
         case SettingsAction::PresetLeftBottom: return text.bottomLeft;
         case SettingsAction::PresetCenterBottom: return text.bottomCenter;
         case SettingsAction::PresetRightBottom: return text.bottomRight;
@@ -610,10 +666,12 @@ std::string SettingsPanel::labelOf(SettingsAction action, const UiText& text) co
         case SettingsAction::FadeOff: return text.off;
         case SettingsAction::SizeDown:
         case SettingsAction::AlphaDown:
-        case SettingsAction::FadeAngleDown: return "−";
+        case SettingsAction::FadeAngleDown:
+        case SettingsAction::CurveDown: return "−";
         case SettingsAction::SizeUp:
         case SettingsAction::AlphaUp:
-        case SettingsAction::FadeAngleUp: return "＋";
+        case SettingsAction::FadeAngleUp:
+        case SettingsAction::CurveUp: return "＋";
         case SettingsAction::ClockOff: return text.off;
         case SettingsAction::Clock12: return text.clock12;
         case SettingsAction::Clock24: return text.clock24;
@@ -913,7 +971,14 @@ void SettingsPanel::drawPositionCard(const Pen& pen, const UiText& text, const C
     // （ボタンはパネル自身の軸で動かすので、コントローラーの座標の数字はボタンと合わず、パネルの軸の数字は向きを
     // 変えるだけで変わってしまう。距離なら向きによらず、どれだけ動かしたかが分かる）
     std::string where;
-    if (mode_ == ButtonMode::Wrist) {
+    if (mode_ == ButtonMode::Detached) {
+        // Room: the standing-space position (the origin is SteamVR's, on the floor)
+        const DetachedPose& room = config.detachedPose;
+        where = room.valid ? std::string(text.positionNow) + "  " + text.posX + " " + signedCm(room.m[0][3]) + "  " +
+                                 text.posY + " " + signedCm(room.m[1][3]) + "  " + text.posZ + " " +
+                                 signedCm(room.m[2][3]) + " cm"
+                           : std::string(text.roomNotPlaced);
+    } else if (mode_ == ButtonMode::Wrist) {
         char distance[96];
         std::snprintf(distance, sizeof(distance), text.wristOffsetFormat,
                       std::round(wristDistanceFromStandard(selectedWrist(config)) * 100.0) + 0.0);
@@ -928,12 +993,21 @@ void SettingsPanel::drawPositionCard(const Pen& pen, const UiText& text, const C
     // 固定先: 見出し（左）と 3 択（右）
     const double attachSize = fitSize(pen, text.rowAttachment, 24, 16, kAttachLabelW - 12, false);
     pen.text(kPosInnerX, centerBaseline(rowY(0), kButtonH, attachSize), text.rowAttachment, attachSize, kTextMuted);
-    const int attach = config.attachment == Attachment::LeftWrist ? 1 : (config.attachment == Attachment::RightWrist ? 2 : 0);
-    drawSegmented(pen, text, {SettingsAction::AttachHead, SettingsAction::AttachLeft, SettingsAction::AttachRight},
+    const int attach = config.attachment == Attachment::LeftWrist    ? 1
+                       : config.attachment == Attachment::RightWrist ? 2
+                       : config.attachment == Attachment::Detached   ? 3
+                                                                     : 0;
+    drawSegmented(pen, text,
+                  {SettingsAction::AttachHead, SettingsAction::AttachLeft, SettingsAction::AttachRight,
+                   SettingsAction::AttachDetached},
                   attach, true);
 
     // 位置のボタン（今その位置なら ✓）
-    if (mode_ == ButtonMode::Wrist) {
+    if (mode_ == ButtonMode::Detached) {
+        drawButton(pen, text, SettingsAction::BringInFront, false, 24);
+        const double hintSize = fitSize(pen, text.roomHint, 20, 13, kPosInnerW, false);
+        pen.text(kPosInnerX, centerBaseline(rowY(2), kButtonH, hintSize), text.roomHint, hintSize, kTextMuted);
+    } else if (mode_ == ButtonMode::Wrist) {
         drawButton(pen, text, SettingsAction::PresetWrist, matchesWristPreset(selectedWrist(config)), 24);
     } else {
         for (const auto& preset : kPresets) drawButton(pen, text, preset.action, matchesPreset(preset, config), 24);
@@ -963,8 +1037,11 @@ void SettingsPanel::drawFacingCard(const Pen& pen, const UiText& text, const Con
     const std::string now = std::string(text.facingNow) + "  " + text.yawName + " " + signedDegrees(yaw) + "  " +
                             text.pitchName + " " + signedDegrees(pitch) + "  " + text.rollName + " " +
                             signedDegrees(roll);
-    const double nowSize = fitSize(pen, now, 18, 12, kFacingInnerW - titleW - 16, false);
-    pen.text(kFacingInnerX + kFacingInnerW, kCardY + 40, now, nowSize, kTextMuted, false, true);
+    // Room: a room pose has no yaw / pitch / roll of its own (the buttons turn it about its own axes)
+    if (mode_ != ButtonMode::Detached) {
+        const double nowSize = fitSize(pen, now, 18, 12, kFacingInnerW - titleW - 16, false);
+        pen.text(kFacingInnerX + kFacingInnerW, kCardY + 40, now, nowSize, kTextMuted, false, true);
+    }
 
     for (const SettingsAction action :
          {SettingsAction::YawLeft, SettingsAction::YawRight, SettingsAction::PitchUp, SettingsAction::PitchDown}) {
@@ -974,7 +1051,20 @@ void SettingsPanel::drawFacingCard(const Pen& pen, const UiText& text, const Con
     drawButton(pen, text, SettingsAction::RollRight, false, 24, +1);
     drawSegmented(pen, text, {SettingsAction::AngleStep1, SettingsAction::AngleStep5}, angleStepDeg_ == 5.0 ? 1 : 0,
                   true);
-    if (mode_ == ButtonMode::Wrist) {
+    if (mode_ == ButtonMode::Detached) {
+        drawButton(pen, text, SettingsAction::FaceMe, false, 24);
+        // Room: Curve  − 40° ＋  (the arc the whole panel wraps)
+        const double right = kFacingInnerX + kFacingInnerW;
+        const double labelSize = fitSize(pen, text.rowCurve, 24, 16, kFacingInnerW - kControlW - 12, false);
+        pen.text(kFacingInnerX, centerBaseline(rowY(4), kButtonH, labelSize), text.rowCurve, labelSize, kTextMuted);
+        char value[16];
+        std::snprintf(value, sizeof(value), "%d°", clampCurveDeg(config.detachedCurveDeg));
+        const double valueSize = fitSize(pen, value, 28, 18, kValueW - 20, true);
+        textCentered(pen, right - kStepButtonW - kValueW / 2, centerBaseline(rowY(4), kButtonH, valueSize), value,
+                     valueSize, kText, true);
+        drawButton(pen, text, SettingsAction::CurveDown, false, 30);
+        drawButton(pen, text, SettingsAction::CurveUp, false, 30);
+    } else if (mode_ == ButtonMode::Wrist) {
         // 傾けると消す（オン / オフ）と、消える角度（薄くなり始める角度〜消えきる角度）
         const double right = kFacingInnerX + kFacingInnerW;
         const char* labels[2] = {text.rowWristFade, text.rowFadeAngle};
@@ -1381,10 +1471,11 @@ void SettingsPanel::render(const Config& config, const AutostartStatus& autostar
     const Pen pen {cr_, &fonts_};
     const UiText& t = uiText(config.language);
     // 固定先・ページが変わったら、カードのボタンを置き直す（下の段と更新の帯はこのあと置き直す）
-    const ButtonMode mode = page_ == SettingsPage::Layout            ? ButtonMode::Layout
-                            : page_ == SettingsPage::Profiles       ? ButtonMode::Profiles
-                            : config.attachment == Attachment::Head ? ButtonMode::Head
-                                                                    : ButtonMode::Wrist;
+    const ButtonMode mode = page_ == SettingsPage::Layout                ? ButtonMode::Layout
+                            : page_ == SettingsPage::Profiles           ? ButtonMode::Profiles
+                            : config.attachment == Attachment::Head     ? ButtonMode::Head
+                            : config.attachment == Attachment::Detached ? ButtonMode::Detached
+                                                                        : ButtonMode::Wrist;
     if (mode != mode_) {
         mode_ = mode;
         layoutButtons();

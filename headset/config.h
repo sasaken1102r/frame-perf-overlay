@@ -14,6 +14,24 @@ enum class Attachment {
     Head,        ///< 頭（HMD）
     LeftWrist,   ///< 左手のコントローラー
     RightWrist,  ///< 右手のコントローラー
+    Detached,    ///< pinned in the room (standing space, Config::detachedPose). "Room" on the dashboard
+};
+
+/** Where a Detached panel sits: a 3×4 standing-space transform, row-major (the layout of vr::HmdMatrix34_t). */
+struct DetachedPose {
+    bool valid = false;  ///< false until the panel has been placed in the room once
+    double m[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
+
+    bool operator==(const DetachedPose& o) const {
+        if (valid != o.valid) return false;
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 4; ++c) {
+                if (m[r][c] != o.m[r][c]) return false;
+            }
+        }
+        return true;
+    }
+    bool operator!=(const DetachedPose& o) const { return !(*this == o); }
 };
 
 /**
@@ -72,6 +90,9 @@ struct Config {
     bool layoutInFile = false;  ///< the file had a usable "layout" (false: first run, from before the grid, unreadable)
     bool layoutRejected = false;  ///< the file had an unusable "layout" (the next save keeps the file as .bad)
     std::string activeProfile;  ///< the profile last used / saved ("active_profile", e.g. "profile-2"); "" = none
+    DetachedPose detachedPose;  ///< where the Detached panel sits ("detached_pose", written only once placed)
+    int detachedCurveDeg = 0;   ///< Detached only: the arc the panel wraps, 0 (flat)..90°, 10° steps
+                                ///< ("detached_curve_deg", written only when not 0)
 };
 
 /**
@@ -83,7 +104,7 @@ std::string defaultConfigPath();
 /**
  * 設定ファイルに書く固定先の名前。
  * @param attachment 固定先
- * @return "head" / "left_wrist" / "right_wrist"
+ * @return "head" / "left_wrist" / "right_wrist" / "detached"
  */
 const char* attachmentName(Attachment attachment);
 

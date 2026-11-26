@@ -1,6 +1,7 @@
 // OpenVR との接続とオーバーレイの実装。
 #include "vr_overlay.h"
 
+#include "detached.h"
 #include "openvr.h"
 #include "placement.h"
 
@@ -37,6 +38,8 @@ constexpr double kFacingCheckDelaySec = 0.5;
 constexpr double kPlacementRetrySec = 0.1;
 // 手首に固定しているコントローラーの番号（役割から引く）を聞き直す間隔（秒）
 constexpr double kWristRoleCheckSec = 1.0;
+// Room: attachedDevice_ while the panel is placed in standing space (SetOverlayTransformAbsolute), not on a device
+constexpr uint32_t kDetachedDevice = 0xfffffffeu;
 
 /**
  * 単調増加の時計で今の時刻を秒で返す。
@@ -163,6 +166,9 @@ VrOverlay::ConnectResult VrOverlay::connect(int panelWidth, int panelHeight, int
     nextPlacementAt_ = std::numeric_limits<double>::infinity();
     wristDevice_ = vr::k_unTrackedDeviceIndexInvalid;
     wristDeviceCheckedAt_ = -1.0;
+    panelInteractive_ = false;  // Room: a new overlay's input method is None, it's flat and has no room pose yet
+    appliedDetached_ = DetachedPose {};
+    appliedCurvature_ = 0.0f;
     panelTextureHeight_ = panelHeight;
     panelTexture_ = std::make_unique<OverlayTexture>();
     retiredPanelTexture_.reset();
@@ -332,6 +338,39 @@ void VrOverlay::updatePlacement(const Config& config, double now) {
         return;
     }
     vr::IVROverlay* overlay = vr::VROverlay();
+    // Room: only the Detached panel curves; head and wrist stay flat
+    wantCurvature_ = config.attachment == Attachment::Detached ? detachedCurvature(config.detachedCurveDeg) : 0.0f;
+    applyCurvature();
+    // Room: a fixed standing-space pose. Without one (never placed) it stays hidden until it's placed. No fade, so
+    // shown means on, placed, and OpenVR took the show
+    if (config.attachment == Attachment::Detached) {
+        bool shown = config.visible && config.detachedPose.valid;
+        bool retry = appliedCurvature_ != wantCurvature_;
+        if (shown && (transformDirty_ || attachedDevice_ != kDetachedDevice || appliedDetached_ != config.detachedPose)) {
+            const vr::HmdMatrix34_t m = toHmdMatrix(config.detachedPose);
+            if (checkOverlay("SetOverlayTransformAbsolute",
+                             overlay->SetOverlayTransformAbsolute(panelHandle_, vr::TrackingUniverseStanding, &m))) {
+                attachedDevice_ = kDetachedDevice;
+                appliedDetached_ = config.detachedPose;
+                transformDirty_ = false;
+            } else {
+                shown = false;
+                retry = true;
+            }
+        }
+        const double alpha = wristFade_.update(false, shown, kDetachedDevice, 1.0, now);
+        retry |= presentation_.apply(
+            config.alpha * alpha,
+            [&](double value) {
+                return checkOverlay("SetOverlayAlpha", overlay->SetOverlayAlpha(panelHandle_, static_cast<float>(value)));
+            },
+            [&](bool show) {
+                return checkOverlay(show ? "ShowOverlay" : "HideOverlay",
+                                    show ? overlay->ShowOverlay(panelHandle_) : overlay->HideOverlay(panelHandle_));
+            });
+        nextPlacementAt_ = retry ? now + kPlacementRetrySec : std::numeric_limits<double>::infinity();
+        return;
+    }
     const bool wrist = config.attachment != Attachment::Head;
     vr::TrackedDeviceIndex_t device = vr::k_unTrackedDeviceIndex_Hmd;
     bool tracked = true;
@@ -377,6 +416,7 @@ void VrOverlay::updatePlacement(const Config& config, double now) {
     double interval = std::numeric_limits<double>::infinity();
     if (wrist && config.visible) interval = wristPollInterval(shown, tracked ? target : 0.0);
     if (retry) interval = std::min(interval, kPlacementRetrySec);
+    if (appliedCurvature_ != wantCurvature_) interval = std::min(interval, kPlacementRetrySec);  // Room: flatten again
     nextPlacementAt_ = now + interval;
 }
 
@@ -443,9 +483,24 @@ void VrOverlay::pollEvents(VrEvents& result, bool includeSystem) {
         while (vr::VRSystem()->PollNextEvent(&event, sizeof(event))) {
             if (event.eventType == vr::VREvent_Quit) result.quit = true;
             if (event.eventType == vr::VREvent_SceneApplicationChanged) result.sceneAppChanged = true;
+            if (event.eventType == vr::VREvent_DashboardDeactivated) result.dashboardClosed = true;  // Room
         }
+    }
+    // The panel's own events. Room: at the input rate while it takes the laser (a grab), else on the tick
+    if (includeSystem || panelInteractive_) {
         while (vr::VROverlay()->PollNextOverlayEvent(panelHandle_, &event, sizeof(event))) {
             if (event.eventType == vr::VREvent_ImageFailed) std::fprintf(stderr, "[VR] 画像の読み込みに失敗しました\n");
+            const bool down = event.eventType == vr::VREvent_MouseButtonDown;
+            if ((down || event.eventType == vr::VREvent_MouseButtonUp) && event.data.mouse.button == vr::VRMouseButton_Left) {
+                // The laser's controller. Some events may not name it: fall back to the dashboard's pointing device
+                uint32_t device = event.trackedDeviceIndex;
+                if (device == vr::k_unTrackedDeviceIndexInvalid || device == vr::k_unTrackedDeviceIndex_Hmd) {
+                    device = vr::VROverlay()->GetPrimaryDashboardDevice();
+                }
+                std::fprintf(stderr, "[room] laser %s on the panel (event device %u, using %u)\n",
+                             down ? "press" : "release", event.trackedDeviceIndex, device);
+                result.grab.push_back({down, device});
+            }
         }
     }
     if (dashboardHandle_ != 0) {
@@ -799,4 +854,47 @@ bool VrOverlay::submitSettings(const uint8_t* rgba) {
         lastSettingsError_ = message;
     }
     return ok;
+}
+
+void VrOverlay::setPanelInteractive(bool interactive) {
+    if (!connected_ || panelHandle_ == 0 || interactive == panelInteractive_) return;
+    const vr::EVROverlayError error = vr::VROverlay()->SetOverlayInputMethod(
+        panelHandle_, interactive ? vr::VROverlayInputMethod_Mouse : vr::VROverlayInputMethod_None);
+    std::fprintf(stderr, "[room] panel input method -> %s: %s\n", interactive ? "Mouse" : "None", overlayErrorName(error));
+    // Refused: keep the old state, so the next call tries again
+    if (error == vr::VROverlayError_None) panelInteractive_ = interactive;
+}
+
+bool VrOverlay::devicePose(uint32_t device, vr::HmdMatrix34_t& pose) const {
+    if (!connected_ || device >= vr::k_unMaxTrackedDeviceCount) return false;
+    vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount] {};
+    vr::VRSystem()->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0.0f, poses, device + 1);
+    if (!poses[device].bPoseIsValid) return false;
+    pose = poses[device].mDeviceToAbsoluteTracking;
+    return true;
+}
+
+uint32_t VrOverlay::dashboardLaserDevice() const {
+    if (!connected_) return vr::k_unTrackedDeviceIndexInvalid;
+    return vr::VROverlay()->GetPrimaryDashboardDevice();
+}
+
+void VrOverlay::setDetachedTransform(const DetachedPose& pose) {
+    if (!connected_ || panelHandle_ == 0 || !pose.valid) return;
+    const vr::HmdMatrix34_t m = toHmdMatrix(pose);
+    if (checkOverlay("SetOverlayTransformAbsolute",
+                     vr::VROverlay()->SetOverlayTransformAbsolute(panelHandle_, vr::TrackingUniverseStanding, &m))) {
+        attachedDevice_ = kDetachedDevice;
+        appliedDetached_ = pose;
+    }
+}
+
+void VrOverlay::applyCurvature() {
+    if (!connected_ || panelHandle_ == 0 || wantCurvature_ == appliedCurvature_) return;
+    const vr::EVROverlayError error = vr::VROverlay()->SetOverlayCurvature(panelHandle_, wantCurvature_);
+    const double widthM = configWidthM_ * panelColumns_;
+    std::fprintf(stderr, "[VR] SetOverlayCurvature(%.3f = %.0f°, radius %.2f m) -> %s\n", wantCurvature_,
+                 wantCurvature_ * 360.0, wantCurvature_ > 0.0f ? widthM / (2.0 * M_PI * wantCurvature_) : 0.0,
+                 overlayErrorName(error));
+    if (error == vr::VROverlayError_None) appliedCurvature_ = wantCurvature_;  // refused: the next updatePlacement retries
 }
