@@ -128,11 +128,11 @@ const UiText kJapanese = {
     "同じ名前は 1 行に",
     "システムを隠す",
     // Room
-    "Room",                                                         // TODO(ja)
-    "Bring it in front of me",                                      // TODO(ja)
-    "Point the laser at the panel and hold the trigger to move it",  // TODO(ja)
-    "Not placed yet",                                               // TODO(ja)
-    "Curve",                                                        // TODO(ja)
+    "部屋",
+    "目の前に出す",
+    "パネルにレーザーを当ててトリガーを押したまま動かす",
+    "まだ置いていません",
+    "カーブ",
 };
 
 const UiText kEnglish = {

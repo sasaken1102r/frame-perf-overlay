@@ -2,14 +2,15 @@
 
 ## 未リリース
 
-### Room: pin the panel in the room (finaea's PR)
+### 部屋に固定（finaea さんの PR #6）
 
-- A fourth attach point on the Placement page, **Room**: the panel stays at a fixed spot in the room (SteamVR's standing space) instead of following your head or a hand. The first time you pick it, it goes 1 m in front of you at eye height, facing you
-- While the dashboard is open, point the laser at the panel and hold the trigger to carry it; it follows the controller and is saved where you let go (moving the laser to the other controller, for example with its grip, closing the dashboard, or changing a setting such as Bring it in front of me or the attach point while carrying it, also lets go). With the dashboard closed it doesn't take the laser, so it never takes game input
-- The Placement page in Room: **Bring it in front of me**, the nudge and Closer / Farther buttons (2 cm / 5 cm along the panel itself), the facing buttons (turn it about its own axes), **Face me** (upright, facing you), and **Curve** − / + (bends the panel around you, 0° flat to 90° of arc in 10° steps; a wider panel bends around a bigger circle). Only the Room panel curves; head and wrist stay flat
-- Shown in Room means on, placed and shown by SteamVR, so the reads and redraws pause exactly as before when the panel is off. Head and wrist (and the wrist-down pause) don't change
-- New settings keys `detached_pose` (12 numbers, written once the panel has been put in the room) and `detached_curve_deg` (written only when it isn't 0), and the `attachment` value `"detached"`. A settings file that never used Room loads and saves exactly as before
-- Tests added: the pose maths (place in front, face me, nudge, turn, the laser grab), the curve, the new keys, and a 0.4.0 settings file round-tripping with no new keys
+- 「配置」のページの固定先に 4 つめ、**部屋**を足した: パネルは頭や手に付いていかず、部屋（SteamVR の立っている空間）の決まった場所にとどまる。初めて選ぶと、目の高さで 1 m 前に、自分の方を向いて出る
+- ダッシュボードを開いている間は、パネルにレーザーを当ててトリガーを押したままにすると運べる。コントローラーについていき、離したところで保存する（レーザーを別のコントローラーに移す（グリップを握るなど）・ダッシュボードを閉じる・運んでいる間に「目の前に出す」や固定先などの設定を変える、のときも離したことになる）。ダッシュボードを閉じているときはレーザーを受けないので、ゲームの入力をじゃますることはない
+- 「部屋」のときの配置のページ: **目の前に出す**、微調整と「近く / 遠く」のボタン（パネル自身の向きで 2cm / 5cm）、向きのボタン（パネル自身の軸で回す）、**自分に向ける**（まっすぐ立てて、自分の方へ）、**カーブ** − / ＋（自分のまわりにパネルを曲げる。0° の平らから 90° の弧まで 10° ずつ。幅の広いパネルは大きい円に沿って曲がる）。曲がるのは「部屋」のパネルだけで、頭と手は平らのまま
+- 「部屋」でパネルを出す = オンで、置いてあって、SteamVR が出している状態。なので、パネルをオフにしたときに値の読み取りと描画が止まるのは今までどおり。頭と手（と手を下げたときの一時停止）は変わらない
+- 設定ファイルに `detached_pose`（12 個の数。部屋に置いたあとに書く）と `detached_curve_deg`（0 でないときだけ書く）、`attachment` の値 `"detached"` を足した。部屋を使っていない設定ファイルは、今までとまったく同じに読み書きする
+- 追加された画面の文言に日本語を足した
+- テストを足した: 姿勢の計算（目の前に置く・自分に向ける・動かす・回す・レーザーでつかむ）、カーブ、新しいキー、新しいキーのない 0.4.0 の設定ファイルを読んで書いても変わらないこと
 
 ### 小さく表示しないときの行・「CPU 上位」・「メモリ上位」（finaea さんの PR #5）
 

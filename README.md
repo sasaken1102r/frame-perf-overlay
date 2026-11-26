@@ -359,3 +359,4 @@ MIT. See [LICENSE](LICENSE). `vendor/frame-updater/` is a copy of the author's o
 - The smaller release build, the faster RGBA conversion and the extra tests were contributed by [cinnacappu](https://github.com/cinnacappu) in [#2](https://github.com/sasaken1102r/frame-perf-overlay/pull/2).
 - The widget layout, the layout editor and profiles were contributed by [finaea](https://github.com/finaea) in [#4](https://github.com/sasaken1102r/frame-perf-overlay/pull/4).
 - The Compact switch on every card, its extra rows, and the CPU items and RAM items widgets were contributed by [finaea](https://github.com/finaea) in [#5](https://github.com/sasaken1102r/frame-perf-overlay/pull/5).
+- Pinning the panel in the room (carrying it with the laser, the curve) was contributed by [finaea](https://github.com/finaea) in [#6](https://github.com/sasaken1102r/frame-perf-overlay/pull/6).

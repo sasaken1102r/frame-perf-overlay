@@ -247,7 +247,7 @@ bool loadConfig(const std::string& path, Config& out, std::vector<std::string>& 
     } else if (attachment == "detached") {
         config.attachment = Attachment::Detached;
     } else if (attachment != "head") {
-        warnings.push_back("attachment は \"head\" か \"left_wrist\" か \"right_wrist\" で書いてください");
+        warnings.push_back("attachment は \"head\" か \"left_wrist\" か \"right_wrist\" か \"detached\" で書いてください");
     }
     // Room: the pose, 12 numbers (3×4, row by row). Anything else is ignored, and the panel is placed in front again
     if (const JsonValue* pose = root.get("detached_pose")) {
@@ -257,7 +257,7 @@ bool loadConfig(const std::string& path, Config& out, std::vector<std::string>& 
             for (size_t i = 0; i < 12; ++i) config.detachedPose.m[i / 4][i % 4] = pose->items[i].number;
             config.detachedPose.valid = true;
         } else {
-            warnings.push_back("detached_pose must be 12 numbers (a 3x4 matrix, row by row); it will be placed again");
+            warnings.push_back("detached_pose は 12 個の数（3×4 の行列を 1 行ずつ）で書いてください。置き直します");
         }
     }
     // Room: the arc the panel wraps, 0..90°, rounded to a 10° step
